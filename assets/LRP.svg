@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="512"
+   height="512"
+   viewBox="0 0 512 512"
+   version="1.1"
+   id="svg1"
+   inkscape:version="1.4.4 (dcaf3e7, 2026-05-05)"
+   sodipodi:docname="LRP.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="px"
+     inkscape:zoom="0.66361052"
+     inkscape:cx="317.20413"
+     inkscape:cy="296.10742"
+     inkscape:window-width="1470"
+     inkscape:window-height="824"
+     inkscape:window-x="0"
+     inkscape:window-y="68"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="layer1" />
+  <defs
+     id="defs1">
+    <clipPath
+       clipPathUnits="userSpaceOnUse"
+       id="clipPath22">
+      <path
+         d="m 1374.39,826.414 c 0,-312.305 -253.17,-565.484 -565.488,-565.484 -312.312,0 -565.488,253.179 -565.488,565.484 0,312.316 253.176,565.496 565.488,565.496 312.318,0 565.488,-253.18 565.488,-565.496 z"
+         id="path20"
+         inkscape:connector-curvature="0" />
+    </clipPath>
+  </defs>
+  <g
+     inkscape:label="Calque 1"
+     inkscape:groupmode="layer"
+     id="layer1">
+    <path
+       inkscape:connector-curvature="0"
+       id="path14"
+       style="fill:#2e5eac;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:0.452705"
+       d="M 512,256.00273 C 512,397.38471 397.38833,512 255.99999,512 114.61438,512 0,397.38471 0,256.00273 0,114.6158 114.61438,0 255.99999,0 397.38833,0 512,114.6158 512,256.00273" />
+    <g
+       id="g16"
+       transform="matrix(0.45270632,0,0,-0.45270475,-110.19506,630.12426)">
+      <g
+         clip-path="url(#clipPath22)"
+         id="g18">
+        <path
+           inkscape:connector-curvature="0"
+           id="path24"
+           style="fill:#ffffff;fill-opacity:1;fill-rule:nonzero;stroke:none"
+           d="m 1167.3,831.492 c -66.63,-86.695 -190.925,-102.965 -277.624,-36.336 -86.699,66.629 -102.969,190.93 -36.34,277.634 66.633,86.68 190.924,102.95 277.624,36.32 86.7,-66.62 102.97,-190.926 36.34,-277.618" />
+        <path
+           inkscape:connector-curvature="0"
+           id="path26"
+           style="fill:none;stroke:#ffffff;stroke-width:11.8031;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:10;stroke-dasharray:none;stroke-opacity:1"
+           d="m 237.32,1188.98 c 103.078,3.36 206.926,-34.75 283.371,-103.98 119.93,-108.621 169.61,-284.258 303.289,-375.422 74.141,-50.562 168.301,-61.726 257.13,-48.902 116.6,16.824 248.14,160.429 293.28,237.996" />
+        <path
+           inkscape:connector-curvature="0"
+           id="path28"
+           style="fill:none;stroke:#ffffff;stroke-width:11.8031;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:10;stroke-dasharray:none;stroke-opacity:1"
+           d="m 241.813,998.457 c 69.667,18.033 144.386,-8.191 203.027,-49.91 58.644,-41.731 105.148,-97.871 155.48,-149.309 25.321,-25.871 51.719,-50.652 78.457,-75.047 21.18,-19.328 42.606,-38.449 65.496,-55.722 81.465,-61.457 182.715,-95.379 284.767,-95.5 141.84,-0.168 283.95,109.191 348.59,188.152" />
+        <path
+           inkscape:connector-curvature="0"
+           id="path30"
+           style="fill:none;stroke:#ffffff;stroke-width:11.8031;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:10;stroke-dasharray:none;stroke-opacity:1"
+           d="m 230.621,799.277 c 49.766,31.243 133.262,20.262 188.418,0.008 55.149,-20.242 102.649,-56.609 149.211,-92.437 26.805,-20.637 53.613,-41.262 80.418,-61.899 34.113,-26.258 68,-53.23 105.664,-74.07 201.113,-111.301 443.008,-60.199 593.518,63.012" />
+        <path
+           inkscape:connector-curvature="0"
+           id="path32"
+           style="fill:none;stroke:#ffffff;stroke-width:11.8031;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:10;stroke-dasharray:none;stroke-opacity:1"
+           d="m 245.211,591.301 c 93.625,57.379 185.207,77.781 287.102,36.847 100.73,-40.449 172.898,-111.007 274.199,-150.027 75.789,-29.191 221.468,-44.512 300.518,-25.891 0,0 78.94,11.29 191.56,70" />
+      </g>
+    </g>
+    <g
+       aria-label="aboratoire"
+       transform="matrix(2.5918842,0,0,2.5918842,155.58261,577.62313)"
+       style="font-variant:normal;font-weight:300;font-size:30px;font-family:'Gill Sans Std';-inkscape-font-specification:GillSansStd-Light;writing-mode:lr-tb;fill:#2e5eac;fill-opacity:1;fill-rule:nonzero;stroke:none"
+       id="text46" />
+  </g>
+</svg>
