@@ -280,6 +280,13 @@ class MainWindow(QMainWindow):
 
             local_sha = self.get_local_commit()
 
+            # First launch after a manual GitHub ZIP download:
+            # no local commit file exists yet, so this copy is the current GitHub state.
+            if not local_sha:
+                self.save_local_commit(remote_sha)
+                self.version_label.setText(f"Version {APP_VERSION} · Up to date")
+                return
+
             if local_sha == remote_sha:
                 self.version_label.setText(f"Version {APP_VERSION} · Up to date")
                 return
