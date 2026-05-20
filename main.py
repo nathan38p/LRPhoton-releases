@@ -2,6 +2,9 @@ import sys
 import json
 import platform
 import webbrowser
+import shutil
+import tempfile
+import zipfile
 from pathlib import Path
 
 import requests
@@ -33,7 +36,12 @@ from tabs.datplot_tab import DatPlotTab
 
 APP_NAME = "LRPhoton 1"
 APP_VERSION = "1.0.1"
-UPDATE_INFO_URL = "https://raw.githubusercontent.com/nathan38p/LRPhoton-releases/main/version.json"
+GITHUB_OWNER = "nathan38p"
+GITHUB_REPO = "LRPhoton-releases"
+GITHUB_BRANCH = "main"
+UPDATE_INFO_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/commits/{GITHUB_BRANCH}"
+SOURCE_ZIP_URL = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/archive/refs/heads/{GITHUB_BRANCH}.zip"
+LOCAL_VERSION_FILE = Path(__file__).resolve().parent / ".lrphoton_commit"
 
 
 class MainWindow(QMainWindow):
@@ -186,64 +194,140 @@ class MainWindow(QMainWindow):
         self.tab_bar.setTabToolTip(self.radial_tab_index, "")
         self.tab_bar.setCurrentIndex(self.radial_tab_index)
 
-    def _version_tuple(self, version: str) -> tuple:
-        parts = []
-        for item in version.strip().replace("v", "").split("."):
-            try:
-                parts.append(int(item))
-            except ValueError:
-                parts.append(0)
-        while len(parts) < 3:
-            parts.append(0)
-        return tuple(parts[:3])
+
+    def get_local_commit(self):
+        if LOCAL_VERSION_FILE.exists():
+            return LOCAL_VERSION_FILE.read_text(encoding="utf-8").strip()
+        return ""
+
+    def save_local_commit(self, commit_sha):
+        LOCAL_VERSION_FILE.write_text(str(commit_sha).strip(), encoding="utf-8")
+
+    def install_update_from_github(self, remote_sha):
+        app_dir = Path(__file__).resolve().parent
+
+        allowed_extensions = {
+            ".py",
+            ".json",
+            ".txt",
+            ".md",
+            ".svg",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".ico",
+            ".icns",
+            ".command",
+            ".bat",
+        }
+
+        ignored_dirs = {
+            ".git",
+            "__pycache__",
+            ".venv",
+            "venv",
+            "dist",
+            "build",
+        }
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            zip_path = temporary_path / "lrphoton_update.zip"
+
+            response = requests.get(SOURCE_ZIP_URL, timeout=20)
+            response.raise_for_status()
+            zip_path.write_bytes(response.content)
+
+            with zipfile.ZipFile(zip_path, "r") as archive:
+                archive.extractall(temporary_path)
+
+            extracted_roots = [path for path in temporary_path.iterdir() if path.is_dir()]
+            if not extracted_roots:
+                raise RuntimeError("Downloaded update archive is empty.")
+
+            source_root = extracted_roots[0]
+
+            for source_path in source_root.rglob("*"):
+                relative_path = source_path.relative_to(source_root)
+
+                if any(part in ignored_dirs for part in relative_path.parts):
+                    continue
+
+                destination_path = app_dir / relative_path
+
+                if source_path.is_dir():
+                    destination_path.mkdir(parents=True, exist_ok=True)
+                    continue
+
+                if source_path.suffix.lower() not in allowed_extensions:
+                    continue
+
+                destination_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source_path, destination_path)
+
+        self.save_local_commit(remote_sha)
 
     def check_for_updates(self):
         try:
-            response = requests.get(UPDATE_INFO_URL, timeout=3)
+            response = requests.get(UPDATE_INFO_URL, timeout=5)
+            response.raise_for_status()
             data = response.json()
 
-            latest_version = str(data.get("version", "")).strip()
-            message = str(data.get("message", "A new version of LRPhoton is available.")).strip()
-
-            system_name = platform.system()
-            if system_name == "Darwin":
-                download_url = str(data.get("macos_download", "")).strip()
-            elif system_name == "Windows":
-                download_url = str(data.get("windows_download", "")).strip()
-            else:
-                download_url = str(data.get("download_url", "")).strip()
-
-            if not download_url:
-                download_url = str(data.get("download_url", "https://github.com/nathan38p/LRPhoton-releases/releases/latest")).strip()
-
-            if not latest_version:
+            remote_sha = str(data.get("sha", "")).strip()
+            if not remote_sha:
                 self.version_label.setText(f"Version {APP_VERSION} · Update status unavailable")
                 return
 
-            if self._version_tuple(latest_version) <= self._version_tuple(APP_VERSION):
+            local_sha = self.get_local_commit()
+
+            if local_sha == remote_sha:
                 self.version_label.setText(f"Version {APP_VERSION} · Up to date")
                 return
 
-            self.version_label.setText(f"Version {APP_VERSION} · Update available: {latest_version}")
+            short_sha = remote_sha[:7]
+            self.version_label.setText(f"Version {APP_VERSION} · Update available: {short_sha}")
 
             box = QMessageBox(self)
             box.setWindowTitle("Update available")
             box.setIcon(QMessageBox.Information)
-            box.setText("A new version of LRPhoton is available.")
+            box.setText("A new version of LRPhoton is available on GitHub.")
             box.setInformativeText(
-                f"Installed version: {APP_VERSION}\n"
-                f"Available version: {latest_version}\n\n"
-                f"{message}"
+                "LRPhoton can download the updated source files automatically.\n\n"
+                "After the update, close LRPhoton and open it again."
             )
-            box.setStandardButtons(QMessageBox.Open | QMessageBox.Cancel)
-            box.setDefaultButton(QMessageBox.Open)
+            box.setStandardButtons(QMessageBox.Yes | QMessageBox.Open | QMessageBox.Cancel)
+            box.button(QMessageBox.Yes).setText("Update now")
+            box.button(QMessageBox.Open).setText("Open GitHub")
+            box.setDefaultButton(QMessageBox.Yes)
 
-            if box.exec() == QMessageBox.Open:
-                webbrowser.open(download_url)
+            result = box.exec()
 
-        except Exception:
-            # Update checking must never prevent the application from starting.
+            if result == QMessageBox.Open:
+                webbrowser.open(f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}")
+                return
+
+            if result != QMessageBox.Yes:
+                return
+
+            self.version_label.setText(f"Version {APP_VERSION} · Updating…")
+            QApplication.processEvents()
+
+            self.install_update_from_github(remote_sha)
+
+            self.version_label.setText(f"Version {APP_VERSION} · Updated")
+            QMessageBox.information(
+                self,
+                "LRPhoton updated",
+                "The update has been installed.\n\nClose LRPhoton and open it again to use the new version."
+            )
+
+        except Exception as error:
             self.version_label.setText(f"Version {APP_VERSION} · Update status unavailable")
+            QMessageBox.warning(
+                self,
+                "Update error",
+                f"Impossible to check or install the update:\n{error}"
+            )
 
 
 def main():
