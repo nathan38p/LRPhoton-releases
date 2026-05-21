@@ -380,10 +380,7 @@ class MainWindow(QMainWindow):
                 self.version_label.setText("Update status unavailable")
                 return
 
-            remote_date = self.format_github_commit_date(data)
             up_to_date_text = "Up to date"
-            if remote_date:
-                up_to_date_text = f"Up to date · {remote_date}"
 
             local_sha = self.get_local_commit()
 
