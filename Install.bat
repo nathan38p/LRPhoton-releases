@@ -5,6 +5,21 @@ cd /d "%~dp0"
 
 set "DEST=C:\Program Files\LRPhoton"
 
+where py >nul 2>nul
+if %errorlevel% neq 0 (
+    echo.
+    echo Python non detecte.
+    echo Installation automatique de Python...
+
+    winget install -e --id Python.Python
+
+    echo.
+    echo Python installe.
+    echo Relancez maintenant Install.bat.
+    pause
+    exit
+)
+
 echo.
 echo =====================================
 echo        Installation de LRPhoton
