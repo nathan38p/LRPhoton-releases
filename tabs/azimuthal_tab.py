@@ -632,7 +632,22 @@ class AzimuthalTab(QWidget):
         toolbar_row.addWidget(self.toolbar, stretch=1)
         toolbar_row.addWidget(self.plot_mode, stretch=0)
         graph_layout.addLayout(toolbar_row)
-        graph_layout.addWidget(self.canvas)
+
+        self.graph_coordinate_label = QLabel("ψ = - | I = -")
+        self.graph_coordinate_label.setMinimumHeight(26)
+        self.graph_coordinate_label.setAlignment(Qt.AlignCenter)
+        self.graph_coordinate_label.setStyleSheet("""
+            QLabel {
+                background-color: #f4f4f4;
+                border-radius: 8px;
+                padding: 4px;
+                font-family: Menlo, Monaco, monospace;
+                font-size: 10px;
+            }
+        """)
+
+        graph_layout.addWidget(self.graph_coordinate_label, stretch=0)
+        graph_layout.addWidget(self.canvas, stretch=1)
 
         self.image_canvas = ImageCanvas()
         self.image_coordinate_label = QLabel("x = - | y = - | I = -")
@@ -652,6 +667,8 @@ class AzimuthalTab(QWidget):
         image_layout.addWidget(self.image_coordinate_label, stretch=0)
 
         self.canvas.mpl_connect("button_press_event", self.on_graph_right_click)
+        self.canvas.mpl_connect("motion_notify_event", self.update_graph_coordinates)
+        self.canvas.mpl_connect("axes_leave_event", self.clear_graph_coordinates)
 
         self.btn_xenocs.clicked.connect(lambda: self.set_instrument_mode("XENOCS"))
         self.btn_id02.clicked.connect(lambda: self.set_instrument_mode("ID02"))
@@ -868,6 +885,20 @@ class AzimuthalTab(QWidget):
     def update_plot_mode(self):
         self.apply_plot_axes()
         self.canvas.draw_idle()
+
+    def update_graph_coordinates(self, event):
+        if event.inaxes != self.canvas.ax or event.xdata is None or event.ydata is None:
+            return
+
+        try:
+            self.graph_coordinate_label.setText(
+                f"ψ = {event.xdata:.6g}° | I = {event.ydata:.6g}"
+            )
+        except Exception:
+            self.graph_coordinate_label.setText("ψ = - | I = -")
+
+    def clear_graph_coordinates(self, event=None):
+        self.graph_coordinate_label.setText("ψ = - | I = -")
 
     def on_graph_right_click(self, event):
         if event.button != 3 or event.inaxes != self.canvas.ax:
