@@ -102,33 +102,25 @@ if errorlevel 1 (
 )
 
 echo.
-echo Creating desktop launcher...
+echo Creating desktop shortcut...
 
-(
-echo @echo off
-echo cd /d "C:\Program Files\LRPhoton"
-echo python main.py
-) > "%USERPROFILE%\Desktop\LRPhoton.bat"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+"$WshShell = New-Object -ComObject WScript.Shell; ^
+$Shortcut = $WshShell.CreateShortcut('%USERPROFILE%\Desktop\LRPhoton.lnk'); ^
+$Shortcut.TargetPath = 'pythonw.exe'; ^
+$Shortcut.Arguments = 'main.py'; ^
+$Shortcut.WorkingDirectory = 'C:\Program Files\LRPhoton'; ^
+$Shortcut.IconLocation = 'C:\Program Files\LRPhoton\assets\LRPhoton.ico'; ^
+$Shortcut.Save()"
 
 if errorlevel 1 (
     echo.
-    echo ERROR: Could not create LRPhoton.bat on the desktop.
+    echo ERROR: Could not create desktop shortcut.
     echo.
     echo Press any key to close Install.bat...
     pause
     exit /b 1
 )
-
-echo.
-echo Creating desktop shortcut icon...
-
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-"$WshShell = New-Object -ComObject WScript.Shell; ^
-$Shortcut = $WshShell.CreateShortcut('%USERPROFILE%\Desktop\LRPhoton.lnk'); ^
-$Shortcut.TargetPath = '%USERPROFILE%\Desktop\LRPhoton.bat'; ^
-$Shortcut.WorkingDirectory = 'C:\Program Files\LRPhoton'; ^
-$Shortcut.IconLocation = 'C:\Program Files\LRPhoton\assets\LRPhoton.ico'; ^
-$Shortcut.Save()"
 
 echo.
 echo ==========================================
