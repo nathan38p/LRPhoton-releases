@@ -5,6 +5,7 @@ import webbrowser
 import shutil
 import tempfile
 import zipfile
+import subprocess
 from pathlib import Path
 
 import requests
@@ -361,6 +362,29 @@ class MainWindow(QMainWindow):
             close_box.button(QMessageBox.Ok).setText("Close")
 
             close_box.exec()
+
+            app_dir = Path(__file__).resolve().parent
+
+            try:
+                if sys.platform == "darwin":
+                    launcher = app_dir / "LRPhoton.command"
+                    if launcher.exists():
+                        subprocess.Popen(["open", str(launcher)])
+                    else:
+                        subprocess.Popen([sys.executable, str(app_dir / "main.py")], cwd=str(app_dir))
+
+                elif sys.platform.startswith("win"):
+                    launcher = app_dir / "Lancer LRPhoton.bat"
+                    if launcher.exists():
+                        subprocess.Popen([str(launcher)], cwd=str(app_dir), shell=True)
+                    else:
+                        subprocess.Popen([sys.executable, str(app_dir / "main.py")], cwd=str(app_dir))
+
+                else:
+                    subprocess.Popen([sys.executable, str(app_dir / "main.py")], cwd=str(app_dir))
+
+            except Exception:
+                pass
 
             self.close()
             QApplication.instance().quit()
