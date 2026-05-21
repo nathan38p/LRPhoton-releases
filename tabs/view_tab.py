@@ -39,6 +39,14 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 
+from .instrument_presets import (
+    ID13_DEFAULT_CENTER_X,
+    ID13_DEFAULT_CENTER_Y,
+    ID13_DEFAULT_DISTANCE_M,
+    ID13_DEFAULT_PIXEL_MM,
+    ID13_DEFAULT_WAVELENGTH_A,
+)
+
 
 class ImageOnlyToolbar(NavigationToolbar):
 
@@ -724,12 +732,12 @@ class ViewTab(QWidget):
 
         if mode == "ID13":
             return {
-                "xc": 1294.689,
-                "yc": 1310.290,
-                "distance_m": 0.8,
-                "pixel_x_mm": 0.075000,
-                "pixel_y_mm": 0.075000,
-                "wavelength_a": 0.826563,
+                "xc": ID13_DEFAULT_CENTER_X,
+                "yc": ID13_DEFAULT_CENTER_Y,
+                "distance_m": ID13_DEFAULT_DISTANCE_M,
+                "pixel_x_mm": ID13_DEFAULT_PIXEL_MM,
+                "pixel_y_mm": ID13_DEFAULT_PIXEL_MM,
+                "wavelength_a": ID13_DEFAULT_WAVELENGTH_A,
             }
 
         if mode == "Custom":

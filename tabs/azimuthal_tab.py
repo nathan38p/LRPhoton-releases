@@ -30,6 +30,14 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 
+from .instrument_presets import (
+    ID13_DEFAULT_CENTER_X,
+    ID13_DEFAULT_CENTER_Y,
+    ID13_DEFAULT_DISTANCE_M,
+    ID13_DEFAULT_PIXEL_MM,
+    ID13_DEFAULT_WAVELENGTH_A,
+)
+
 
 # ============================================================
 # FILE TOOLS
@@ -1098,11 +1106,11 @@ class AzimuthalTab(QWidget):
             px = get_header_float(header, "PSize_1", "psize_1", "PSize_X", "PixelSizeX")
             py = get_header_float(header, "PSize_2", "psize_2", "PSize_Y", "PixelSizeY")
             wav = get_header_float(header, "WaveLength", "Wavelength", "wavelength")
-            self.center_x.setValue(cx if cx is not None else 1294.689)
-            self.center_y.setValue(cy if cy is not None else 1310.290)
-            self.distance.setValue(dist if dist is not None else 0.8)
-            self.pixel_x.setValue(px * 1000 if px is not None else 0.075000)
-            self.pixel_y.setValue(py * 1000 if py is not None else 0.075000)
+            self.center_x.setValue(cx if cx is not None else ID13_DEFAULT_CENTER_X)
+            self.center_y.setValue(cy if cy is not None else ID13_DEFAULT_CENTER_Y)
+            self.distance.setValue(dist if dist is not None else ID13_DEFAULT_DISTANCE_M)
+            self.pixel_x.setValue(px * 1000 if px is not None else ID13_DEFAULT_PIXEL_MM)
+            self.pixel_y.setValue(py * 1000 if py is not None else ID13_DEFAULT_PIXEL_MM)
             if wav is not None:
                 if wav < 1e-6:
                     self.wavelength.setValue(wav * 1e10)
@@ -1111,7 +1119,7 @@ class AzimuthalTab(QWidget):
                 else:
                     self.wavelength.setValue(wav)
             else:
-                self.wavelength.setValue(0.826563)
+                self.wavelength.setValue(ID13_DEFAULT_WAVELENGTH_A)
             self.q_min.setValue(0.1)
             self.q_max.setValue(1.0)
             return

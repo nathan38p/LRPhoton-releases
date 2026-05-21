@@ -11,6 +11,14 @@ from PySide6.QtWidgets import (
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
+from .instrument_presets import (
+    ID13_DEFAULT_CENTER_X,
+    ID13_DEFAULT_CENTER_Y,
+    ID13_DEFAULT_DISTANCE_M,
+    ID13_DEFAULT_PIXEL_MM,
+    ID13_DEFAULT_WAVELENGTH_A,
+)
+
 
 # ============================================================
 # ======================= EDF TOOLS ==========================
@@ -669,7 +677,7 @@ class PlotCanvas(FigureCanvas):
 # ============================================================
 
 class CentreTab(QWidget):
-    def __init__(self, user_email="", default_xc=1294.689, default_yc=1310.290):
+    def __init__(self, user_email="", default_xc=ID13_DEFAULT_CENTER_X, default_yc=ID13_DEFAULT_CENTER_Y):
         super().__init__()
 
         self.user_email = user_email
@@ -1008,12 +1016,12 @@ class CentreTab(QWidget):
             self.edit_px_x.blockSignals(True)
             self.edit_px_y.blockSignals(True)
             self.edit_lambda.blockSignals(True)
-            self.edit_xc.setValue(center_1 if center_1 is not None else 1294.689)
-            self.edit_yc.setValue(center_2 if center_2 is not None else 1310.290)
-            self.edit_distance.setValue(sample_distance if sample_distance is not None else 0.8)
-            self.edit_px_x.setValue(pixel_x_m * 1000 if pixel_x_m is not None else 0.075000)
-            self.edit_px_y.setValue(pixel_y_m * 1000 if pixel_y_m is not None else 0.075000)
-            self.edit_lambda.setValue(wavelength_m * 1e10 if wavelength_m is not None else 0.826563)
+            self.edit_xc.setValue(center_1 if center_1 is not None else ID13_DEFAULT_CENTER_X)
+            self.edit_yc.setValue(center_2 if center_2 is not None else ID13_DEFAULT_CENTER_Y)
+            self.edit_distance.setValue(sample_distance if sample_distance is not None else ID13_DEFAULT_DISTANCE_M)
+            self.edit_px_x.setValue(pixel_x_m * 1000 if pixel_x_m is not None else ID13_DEFAULT_PIXEL_MM)
+            self.edit_px_y.setValue(pixel_y_m * 1000 if pixel_y_m is not None else ID13_DEFAULT_PIXEL_MM)
+            self.edit_lambda.setValue(wavelength_m * 1e10 if wavelength_m is not None else ID13_DEFAULT_WAVELENGTH_A)
             self.edit_xc.blockSignals(False)
             self.edit_yc.blockSignals(False)
             self.edit_distance.blockSignals(False)

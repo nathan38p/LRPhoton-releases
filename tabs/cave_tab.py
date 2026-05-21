@@ -26,6 +26,14 @@ from PySide6.QtWidgets import (
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
+from .instrument_presets import (
+    ID13_DEFAULT_CENTER_X,
+    ID13_DEFAULT_CENTER_Y,
+    ID13_DEFAULT_DISTANCE_M,
+    ID13_DEFAULT_PIXEL_MM,
+    ID13_DEFAULT_WAVELENGTH_A,
+)
+
 
 # ============================================================
 # ========================= FILE TOOLS ========================
@@ -1170,10 +1178,10 @@ class CaveTab(QWidget):
             pixel_y = ID02_DEFAULT_PIXEL_MM if pixel_y is None else pixel_y
             wavelength = ID02_DEFAULT_WAVELENGTH_A if wavelength is None else wavelength
         elif self.instrument_mode == "ID13":
-            distance_m = 0.8 if distance_m is None else distance_m
-            pixel_x = 0.075 if pixel_x is None else pixel_x
-            pixel_y = 0.075 if pixel_y is None else pixel_y
-            wavelength = 0.826563 if wavelength is None else wavelength
+            distance_m = ID13_DEFAULT_DISTANCE_M if distance_m is None else distance_m
+            pixel_x = ID13_DEFAULT_PIXEL_MM if pixel_x is None else pixel_x
+            pixel_y = ID13_DEFAULT_PIXEL_MM if pixel_y is None else pixel_y
+            wavelength = ID13_DEFAULT_WAVELENGTH_A if wavelength is None else wavelength
 
         if distance_m is None or pixel_x is None or pixel_y is None or wavelength is None:
             return None
@@ -1223,8 +1231,8 @@ class CaveTab(QWidget):
         if self.instrument_mode == "ID13":
             center_1 = get_header_float(self.header, *CENTER_X_KEYS)
             center_2 = get_header_float(self.header, *CENTER_Y_KEYS)
-            self.xc_spin.setValue(center_1 if center_1 is not None else 1294.689)
-            self.yc_spin.setValue(center_2 if center_2 is not None else 1310.290)
+            self.xc_spin.setValue(center_1 if center_1 is not None else ID13_DEFAULT_CENTER_X)
+            self.yc_spin.setValue(center_2 if center_2 is not None else ID13_DEFAULT_CENTER_Y)
             self.nan_operator_combo.setCurrentText(">=")
             self.nan_threshold_spin.setValue(4e9)
             return

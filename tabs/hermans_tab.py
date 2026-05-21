@@ -28,6 +28,14 @@ from PySide6.QtWidgets import (
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
+from .instrument_presets import (
+    ID13_DEFAULT_CENTER_X,
+    ID13_DEFAULT_CENTER_Y,
+    ID13_DEFAULT_DISTANCE_M,
+    ID13_DEFAULT_PIXEL_MM,
+    ID13_DEFAULT_WAVELENGTH_A,
+)
+
 
 # ============================================================
 # =========================== TOOLS ===========================
@@ -1206,8 +1214,8 @@ class HermansTab(QWidget):
             x = header_float(header, CENTER_X_KEYS, ID02_DEFAULT_CENTER_X)
             y = header_float(header, CENTER_Y_KEYS, ID02_DEFAULT_CENTER_Y)
         elif self.instrument_mode == "ID13":
-            x = header_float(header, CENTER_X_KEYS, 1294.689)
-            y = header_float(header, CENTER_Y_KEYS, 1310.290)
+            x = header_float(header, CENTER_X_KEYS, ID13_DEFAULT_CENTER_X)
+            y = header_float(header, CENTER_Y_KEYS, ID13_DEFAULT_CENTER_Y)
         else:
             x = self.center_x_spin.value() if self.center_x_spin.value() != 0 else header_float(header, CENTER_X_KEYS, nx / 2)
             y = self.center_y_spin.value() if self.center_y_spin.value() != 0 else header_float(header, CENTER_Y_KEYS, ny / 2)
@@ -1580,9 +1588,9 @@ class HermansTab(QWidget):
             default_pixel = ID02_DEFAULT_PIXEL_MM
             default_wavelength = ID02_DEFAULT_WAVELENGTH_A
         elif self.instrument_mode == "ID13":
-            default_distance = 0.8
-            default_pixel = 0.075
-            default_wavelength = 0.826563
+            default_distance = ID13_DEFAULT_DISTANCE_M
+            default_pixel = ID13_DEFAULT_PIXEL_MM
+            default_wavelength = ID13_DEFAULT_WAVELENGTH_A
         else:
             default_distance = 0.9
             default_pixel = 0.075
