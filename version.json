@@ -1,7 +1,0 @@
-{
-  "version": "1.0.1",
-  "macos_download": "https://github.com/nathan38p/LRPhoton-releases/releases/latest/download/LRPhoton1-macOS.zip",
-  "windows_download": "https://github.com/nathan38p/LRPhoton-releases/releases/latest/download/LRPhoton1-Windows.zip",
-  "download_url": "https://github.com/nathan38p/LRPhoton-releases/releases/latest",
-  "message": "A new version of LRPhoton is available."
-}
