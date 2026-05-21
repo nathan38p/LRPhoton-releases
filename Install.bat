@@ -17,22 +17,25 @@ if errorlevel 1 echo Python Manager non trouve par winget, installation ignoree.
 :: INSTALLATION PYTHON 3.14 x64 SI ABSENT
 :: =========================================================
 
+echo Verification de Python x64...
+
 py -3.14-64 --version >nul 2>&1
 
 if errorlevel 1 (
+    echo.
     echo Python 3.14 x64 non detecte.
-    echo Installation automatique...
+    echo Installation de Python 3.14 x64...
 
     winget install -e --id Python.Python.3.14 --architecture x64
 
     echo.
     echo Python installe.
-    echo Relancez maintenant Install.bat
+    echo Relancez Install.bat.
     pause
     exit
 )
 
-echo Python detecte.
+echo Python 3.14 x64 detecte.
 echo.
 
 :: =========================================================
