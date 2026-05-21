@@ -5,32 +5,24 @@ cd /d "%~dp0"
 
 set "DEST=C:\Program Files\LRPhoton"
 
-where py >nul 2>nul
+py -3.13-64 --version >nul 2>nul
 if %errorlevel% neq 0 (
     echo.
-    echo Python non detecte.
-    echo Installation automatique de Python...
+    echo Python 3.13 x64 non detecte.
+    echo Installation automatique de Python 3.13 x64...
 
-    winget install -e --id Python.Python.3.14
-    if %errorlevel% neq 0 winget install -e --id Python.Python.3.13
-    if %errorlevel% neq 0 winget install -e --id Python.Python.3.12
+    winget install -e --id Python.Python.3.13 --architecture x64
 
-    where py >nul 2>nul
+    py -3.13-64 --version >nul 2>nul
     if %errorlevel% neq 0 (
         echo.
-        echo ERREUR : Python n'a pas pu etre installe automatiquement.
-        echo Installez Python manuellement depuis :
-        echo https://www.python.org/downloads/
+        echo ERREUR : Python 3.13 x64 n'a pas pu etre installe automatiquement.
+        echo Installez Python 3.13 x64 manuellement depuis :
+        echo https://www.python.org/downloads/windows/
         echo Puis relancez Install.bat.
         pause
         exit
     )
-
-    echo.
-    echo Python installe.
-    echo Relancez maintenant Install.bat.
-    pause
-    exit
 )
 
 echo.
@@ -50,15 +42,15 @@ cd /d "%DEST%"
 
 echo.
 echo Installation des dependances Python...
-py -m pip install --upgrade pip
-py -m pip install PySide6 numpy matplotlib h5py fabio requests hdf5plugin
+py -3.13-64 -m pip install --upgrade pip
+py -3.13-64 -m pip install PySide6 numpy matplotlib h5py fabio requests hdf5plugin
 
 echo.
 echo Creation du lanceur LRPhoton.bat...
 
 echo @echo off > "%DEST%\LRPhoton.bat"
 echo cd /d "C:\Program Files\LRPhoton" >> "%DEST%\LRPhoton.bat"
-echo start "" pyw "main.py" >> "%DEST%\LRPhoton.bat"
+echo start "" py -3.13-64 "main.py" >> "%DEST%\LRPhoton.bat"
 echo exit >> "%DEST%\LRPhoton.bat"
 
 echo.
@@ -74,7 +66,7 @@ $Shortcut.Save()"
 
 echo.
 echo Lancement de LRPhoton...
-start "" pyw "main.py"
+start "" py -3.13-64 "main.py"
 
 echo.
 echo =====================================
