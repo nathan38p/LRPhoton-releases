@@ -213,7 +213,8 @@ class MainWindow(QMainWindow):
 
         try:
             parsed_date = datetime.fromisoformat(commit_date.replace("Z", "+00:00"))
-            return parsed_date.strftime("%d/%m/%Y %H:%M")
+            local_date = parsed_date.astimezone()
+            return local_date.strftime("%d/%m/%Y %H:%M")
         except Exception:
             return ""
 
