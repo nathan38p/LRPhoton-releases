@@ -120,6 +120,15 @@ def add_matching_edf_center(header: dict, filename: str):
     return header
 
 
+ID02_DEFAULT_CENTER_X = 914.4
+ID02_DEFAULT_CENTER_Y = 996.5
+ID02_DEFAULT_DISTANCE_M = 10.0002
+ID02_DEFAULT_PIXEL_MM = 0.075
+ID02_DEFAULT_WAVELENGTH_A = 1.01402
+CENTER_X_KEYS = ("Center_1", "center_1", "CenterX", "center_x", "BeamCenterX", "Beam_x", "beam_x")
+CENTER_Y_KEYS = ("Center_2", "center_2", "CenterY", "center_y", "BeamCenterY", "Beam_y", "beam_y")
+
+
 def read_h5_first_image(filename: str):
     filename = Path(filename)
     datasets = []
@@ -958,55 +967,79 @@ class CentreTab(QWidget):
             return
 
         if self.instrument_mode == "ID02":
+            center_1 = self.get_header_float(header, *CENTER_X_KEYS)
+            center_2 = self.get_header_float(header, *CENTER_Y_KEYS)
+            sample_distance = self.get_header_float(header, "SampleDistance", "sampledistance", "sample_distance")
+            pixel_x_m = self.get_header_float(header, "PSize_1", "psize_1", "PSize_X", "PixelSizeX")
+            pixel_y_m = self.get_header_float(header, "PSize_2", "psize_2", "PSize_Y", "PixelSizeY")
+            wavelength_m = self.get_header_float(header, "WaveLength", "Wavelength", "wavelength")
             self.edit_xc.blockSignals(True)
             self.edit_yc.blockSignals(True)
             self.edit_distance.blockSignals(True)
+            self.edit_px_x.blockSignals(True)
+            self.edit_px_y.blockSignals(True)
             self.edit_lambda.blockSignals(True)
-            self.edit_xc.setValue(919.689)
-            self.edit_yc.setValue(994.290)
-            self.edit_distance.setValue(1.0)
-            self.edit_lambda.setValue(1.0)
+            self.edit_xc.setValue(center_1 if center_1 is not None else ID02_DEFAULT_CENTER_X)
+            self.edit_yc.setValue(center_2 if center_2 is not None else ID02_DEFAULT_CENTER_Y)
+            self.edit_distance.setValue(sample_distance if sample_distance is not None else ID02_DEFAULT_DISTANCE_M)
+            self.edit_px_x.setValue(pixel_x_m * 1000 if pixel_x_m is not None else ID02_DEFAULT_PIXEL_MM)
+            self.edit_px_y.setValue(pixel_y_m * 1000 if pixel_y_m is not None else ID02_DEFAULT_PIXEL_MM)
+            self.edit_lambda.setValue(wavelength_m * 1e10 if wavelength_m is not None else ID02_DEFAULT_WAVELENGTH_A)
             self.edit_xc.blockSignals(False)
             self.edit_yc.blockSignals(False)
             self.edit_distance.blockSignals(False)
+            self.edit_px_x.blockSignals(False)
+            self.edit_px_y.blockSignals(False)
             self.edit_lambda.blockSignals(False)
             self.xc = self.edit_xc.value()
             self.yc = self.edit_yc.value()
             return
 
         if self.instrument_mode == "ID13":
+            center_1 = self.get_header_float(header, *CENTER_X_KEYS)
+            center_2 = self.get_header_float(header, *CENTER_Y_KEYS)
+            sample_distance = self.get_header_float(header, "SampleDistance", "sampledistance", "sample_distance")
+            pixel_x_m = self.get_header_float(header, "PSize_1", "psize_1", "PSize_X", "PixelSizeX")
+            pixel_y_m = self.get_header_float(header, "PSize_2", "psize_2", "PSize_Y", "PixelSizeY")
+            wavelength_m = self.get_header_float(header, "WaveLength", "Wavelength", "wavelength")
             self.edit_xc.blockSignals(True)
             self.edit_yc.blockSignals(True)
             self.edit_distance.blockSignals(True)
+            self.edit_px_x.blockSignals(True)
+            self.edit_px_y.blockSignals(True)
             self.edit_lambda.blockSignals(True)
-            self.edit_xc.setValue(1294.689)
-            self.edit_yc.setValue(1310.290)
-            self.edit_distance.setValue(0.8)
-            self.edit_lambda.setValue(0.826563)
+            self.edit_xc.setValue(center_1 if center_1 is not None else 1294.689)
+            self.edit_yc.setValue(center_2 if center_2 is not None else 1310.290)
+            self.edit_distance.setValue(sample_distance if sample_distance is not None else 0.8)
+            self.edit_px_x.setValue(pixel_x_m * 1000 if pixel_x_m is not None else 0.075000)
+            self.edit_px_y.setValue(pixel_y_m * 1000 if pixel_y_m is not None else 0.075000)
+            self.edit_lambda.setValue(wavelength_m * 1e10 if wavelength_m is not None else 0.826563)
             self.edit_xc.blockSignals(False)
             self.edit_yc.blockSignals(False)
             self.edit_distance.blockSignals(False)
+            self.edit_px_x.blockSignals(False)
+            self.edit_px_y.blockSignals(False)
             self.edit_lambda.blockSignals(False)
             self.xc = self.edit_xc.value()
             self.yc = self.edit_yc.value()
             return
 
-    def apply_header_values(self, header):
-        def get_header_float(*names):
-            for name in names:
-                if name in header:
-                    try:
-                        return float(header[name])
-                    except (TypeError, ValueError):
-                        return None
-            return None
+    def get_header_float(self, header, *names):
+        for name in names:
+            if name in header:
+                try:
+                    return float(header[name])
+                except (TypeError, ValueError):
+                    return None
+        return None
 
-        center_1 = get_header_float("Center_1", "center_1")
-        center_2 = get_header_float("Center_2", "center_2")
-        sample_distance = get_header_float("SampleDistance", "sample_distance")
-        pixel_x_m = get_header_float("PSize_1", "PSize_X", "PixelSizeX")
-        pixel_y_m = get_header_float("PSize_2", "PSize_Y", "PixelSizeY")
-        wavelength_m = get_header_float("WaveLength", "Wavelength", "wavelength")
+    def apply_header_values(self, header):
+        center_1 = self.get_header_float(header, *CENTER_X_KEYS)
+        center_2 = self.get_header_float(header, *CENTER_Y_KEYS)
+        sample_distance = self.get_header_float(header, "SampleDistance", "sampledistance", "sample_distance")
+        pixel_x_m = self.get_header_float(header, "PSize_1", "psize_1", "PSize_X", "PixelSizeX")
+        pixel_y_m = self.get_header_float(header, "PSize_2", "psize_2", "PSize_Y", "PixelSizeY")
+        wavelength_m = self.get_header_float(header, "WaveLength", "Wavelength", "wavelength")
 
         self.xc = center_1 if center_1 is not None else 0
         self.yc = center_2 if center_2 is not None else 0

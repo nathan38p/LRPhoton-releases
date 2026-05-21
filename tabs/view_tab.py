@@ -704,12 +704,22 @@ class ViewTab(QWidget):
     def preset_q_geometry(self, mode):
         if mode == "ID02":
             return {
-                "xc": 919.689,
-                "yc": 994.290,
-                "distance_m": 1.0,
+                "xc": 914.4,
+                "yc": 996.5,
+                "distance_m": 10.0002,
                 "pixel_x_mm": 0.075000,
                 "pixel_y_mm": 0.075000,
-                "wavelength_a": 1.0,
+                "wavelength_a": 1.01402,
+            }
+
+        if mode == "XENOCS":
+            return {
+                "xc": 0.0,
+                "yc": 0.0,
+                "distance_m": 0.0,
+                "pixel_x_mm": 0.075000,
+                "pixel_y_mm": 0.075000,
+                "wavelength_a": 0.0,
             }
 
         if mode == "ID13":
@@ -1235,10 +1245,9 @@ class ViewTab(QWidget):
         q_geometry = self.get_q_geometry_from_header()
         if q_geometry is not None:
             xc, yc, distance_m, pixel_x_mm, pixel_y_mm, wavelength_nm = q_geometry
-            source = "header"
-            header_geometry = self.get_header_q_geometry()
-            if header_geometry is None and self.q_geometry_mode is not None:
-                source = self.q_geometry_mode
+            source = self.q_geometry_mode or "header"
+            if self.get_header_q_values():
+                source = f"{source} + header"
 
             lines.extend([
                 "",
@@ -1380,11 +1389,13 @@ class ViewTab(QWidget):
 
         possible_x_keys = [
             "Center_1",
+            "center_1",
             "Center1",
             "BeamCenter_1",
             "BeamCenterX",
             "Center_X",
             "CenterX",
+            "center_x",
             "Poni1",
             "Beam_x",
             "beam_x"
@@ -1392,11 +1403,13 @@ class ViewTab(QWidget):
 
         possible_y_keys = [
             "Center_2",
+            "center_2",
             "Center2",
             "BeamCenter_2",
             "BeamCenterY",
             "Center_Y",
             "CenterY",
+            "center_y",
             "Poni2",
             "Beam_y",
             "beam_y"
@@ -1439,6 +1452,59 @@ class ViewTab(QWidget):
 
         return None
 
+    def get_header_q_values(self):
+        center = self.get_center_from_header()
+        distance_m = self.get_header_float(
+            "SampleDistance",
+            "sampledistance",
+            "sample_distance",
+            "Distance",
+            "DetectorDistance",
+            "detector_distance",
+        )
+        pixel_x = self.get_header_float(
+            "PSize_1",
+            "psize_1",
+            "PSize_X",
+            "PixelSizeX",
+            "pixel_size_x",
+            "x_pixel_size",
+        )
+        pixel_y = self.get_header_float(
+            "PSize_2",
+            "psize_2",
+            "PSize_Y",
+            "PixelSizeY",
+            "pixel_size_y",
+            "y_pixel_size",
+        )
+        wavelength = self.get_header_float(
+            "WaveLength",
+            "Wavelength",
+            "wavelength",
+            "Lambda",
+            "lambda",
+        )
+
+        values = {}
+        if center is not None:
+            values["xc"], values["yc"] = center
+        if distance_m is not None:
+            values["distance_m"] = distance_m
+        if pixel_x is not None:
+            values["pixel_x_mm"] = pixel_x * 1000.0 if pixel_x < 1e-3 else pixel_x
+        if pixel_y is not None:
+            values["pixel_y_mm"] = pixel_y * 1000.0 if pixel_y < 1e-3 else pixel_y
+        if wavelength is not None:
+            if wavelength < 1e-6:
+                values["wavelength_a"] = wavelength * 1e10
+            elif wavelength < 0.5:
+                values["wavelength_a"] = wavelength * 10.0
+            else:
+                values["wavelength_a"] = wavelength
+
+        return values
+
     def wavelength_to_nm(self, wavelength):
         if wavelength < 1e-6:
             return wavelength * 1e9
@@ -1455,6 +1521,7 @@ class ViewTab(QWidget):
 
         distance_m = self.get_header_float(
             "SampleDistance",
+            "sampledistance",
             "sample_distance",
             "Distance",
             "DetectorDistance",
@@ -1463,6 +1530,7 @@ class ViewTab(QWidget):
 
         pixel_x = self.get_header_float(
             "PSize_1",
+            "psize_1",
             "PSize_X",
             "PixelSizeX",
             "pixel_size_x",
@@ -1471,6 +1539,7 @@ class ViewTab(QWidget):
 
         pixel_y = self.get_header_float(
             "PSize_2",
+            "psize_2",
             "PSize_Y",
             "PixelSizeY",
             "pixel_size_y",
@@ -1501,7 +1570,7 @@ class ViewTab(QWidget):
         return xc, yc, distance_m, pixel_x_mm, pixel_y_mm, wavelength_nm
 
     def get_preset_q_geometry(self):
-        geometry = self.preset_q_geometry(self.q_geometry_mode)
+        geometry = self.q_geometry_values_for_mode()
         if not geometry:
             return None
 
@@ -1517,17 +1586,24 @@ class ViewTab(QWidget):
 
         return xc, yc, distance_m, pixel_x_mm, pixel_y_mm, wavelength_nm
 
+    def q_geometry_values_for_mode(self):
+        geometry = self.preset_q_geometry(self.q_geometry_mode)
+        if geometry is None:
+            return None
+
+        geometry = dict(geometry)
+        header_values = self.get_header_q_values()
+        if self.q_geometry_mode != "Custom":
+            geometry.update(header_values)
+        else:
+            for key, value in header_values.items():
+                if geometry.get(key) in (None, 0):
+                    geometry[key] = value
+
+        return geometry
+
     def get_q_geometry_from_header(self):
-        header_geometry = self.get_header_q_geometry()
-        if header_geometry is not None:
-            return header_geometry
-
-        preset_geometry = self.get_preset_q_geometry()
-        header_center = self.get_center_from_header()
-        if preset_geometry is not None and header_center is not None:
-            return header_center[0], header_center[1], *preset_geometry[2:]
-
-        return preset_geometry
+        return self.get_preset_q_geometry()
 
     def calculate_q_at_pixel(self, x_index, y_index):
         geometry = self.get_q_geometry_from_header()
@@ -1557,11 +1633,10 @@ class ViewTab(QWidget):
 
         self.center_artists = []
 
-        center = self.get_center_from_header()
-        if center is None:
-            geometry = self.get_preset_q_geometry()
-            if geometry is not None:
-                center = geometry[:2]
+        values = self.q_geometry_values_for_mode()
+        center = None
+        if values is not None and values.get("xc") is not None and values.get("yc") is not None:
+            center = values["xc"], values["yc"]
 
         if center is None:
             return

@@ -295,6 +295,15 @@ def get_header_float(header: dict, *names):
     return None
 
 
+ID02_DEFAULT_CENTER_X = 914.4
+ID02_DEFAULT_CENTER_Y = 996.5
+ID02_DEFAULT_DISTANCE_M = 10.0002
+ID02_DEFAULT_PIXEL_MM = 0.075
+ID02_DEFAULT_WAVELENGTH_A = 1.01402
+CENTER_X_KEYS = ("Center_1", "center_1", "CenterX", "center_x", "BeamCenterX", "Beam_x", "beam_x")
+CENTER_Y_KEYS = ("Center_2", "center_2", "CenterY", "center_y", "BeamCenterY", "Beam_y", "beam_y")
+
+
 # ============================================================
 # ========================= CAVE TOOLS ========================
 # ============================================================
@@ -1122,6 +1131,7 @@ class CaveTab(QWidget):
         distance_m = get_header_float(
             self.header,
             "SampleDistance",
+            "sampledistance",
             "sample_distance",
             "Distance",
             "DetectorDistance",
@@ -1130,6 +1140,7 @@ class CaveTab(QWidget):
         pixel_x = get_header_float(
             self.header,
             "PSize_1",
+            "psize_1",
             "PSize_X",
             "PixelSizeX",
             "pixel_size_x",
@@ -1138,6 +1149,7 @@ class CaveTab(QWidget):
         pixel_y = get_header_float(
             self.header,
             "PSize_2",
+            "psize_2",
             "PSize_Y",
             "PixelSizeY",
             "pixel_size_y",
@@ -1153,10 +1165,10 @@ class CaveTab(QWidget):
         )
 
         if self.instrument_mode == "ID02":
-            distance_m = 1.0 if distance_m is None else distance_m
-            pixel_x = 0.075 if pixel_x is None else pixel_x
-            pixel_y = 0.075 if pixel_y is None else pixel_y
-            wavelength = 1.0 if wavelength is None else wavelength
+            distance_m = ID02_DEFAULT_DISTANCE_M if distance_m is None else distance_m
+            pixel_x = ID02_DEFAULT_PIXEL_MM if pixel_x is None else pixel_x
+            pixel_y = ID02_DEFAULT_PIXEL_MM if pixel_y is None else pixel_y
+            wavelength = ID02_DEFAULT_WAVELENGTH_A if wavelength is None else wavelength
         elif self.instrument_mode == "ID13":
             distance_m = 0.8 if distance_m is None else distance_m
             pixel_x = 0.075 if pixel_x is None else pixel_x
@@ -1191,8 +1203,8 @@ class CaveTab(QWidget):
 
     def apply_instrument_preset(self):
         if self.instrument_mode == "XENOCS":
-            center_1 = get_header_float(self.header, "Center_1", "center_1")
-            center_2 = get_header_float(self.header, "Center_2", "center_2")
+            center_1 = get_header_float(self.header, *CENTER_X_KEYS)
+            center_2 = get_header_float(self.header, *CENTER_Y_KEYS)
             self.xc_spin.setValue(center_1 if center_1 is not None else 0)
             self.yc_spin.setValue(center_2 if center_2 is not None else 0)
             self.nan_operator_combo.setCurrentText("<=")
@@ -1200,15 +1212,19 @@ class CaveTab(QWidget):
             return
 
         if self.instrument_mode == "ID02":
-            self.xc_spin.setValue(919.689)
-            self.yc_spin.setValue(994.290)
+            center_1 = get_header_float(self.header, *CENTER_X_KEYS)
+            center_2 = get_header_float(self.header, *CENTER_Y_KEYS)
+            self.xc_spin.setValue(center_1 if center_1 is not None else ID02_DEFAULT_CENTER_X)
+            self.yc_spin.setValue(center_2 if center_2 is not None else ID02_DEFAULT_CENTER_Y)
             self.nan_operator_combo.setCurrentText("<=")
             self.nan_threshold_spin.setValue(-9)
             return
 
         if self.instrument_mode == "ID13":
-            self.xc_spin.setValue(1294.689)
-            self.yc_spin.setValue(1310.290)
+            center_1 = get_header_float(self.header, *CENTER_X_KEYS)
+            center_2 = get_header_float(self.header, *CENTER_Y_KEYS)
+            self.xc_spin.setValue(center_1 if center_1 is not None else 1294.689)
+            self.yc_spin.setValue(center_2 if center_2 is not None else 1310.290)
             self.nan_operator_combo.setCurrentText(">=")
             self.nan_threshold_spin.setValue(4e9)
             return

@@ -485,6 +485,20 @@ def main():
             background: transparent;
         }
 
+        QGroupBox {
+            background-color: #f4f4f4;
+            border: none;
+            border-radius: 10px;
+            margin-top: 14px;
+            padding: 4px;
+        }
+
+        QGroupBox::title {
+            subcontrol-origin: margin;
+            left: 8px;
+            padding: 0px 4px;
+        }
+
         QTabBar::tab {
             padding: 7px 18px;
             margin-right: 2px;

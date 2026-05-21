@@ -249,6 +249,15 @@ def get_header_float(header: dict, *names):
     return None
 
 
+ID02_DEFAULT_CENTER_X = 914.4
+ID02_DEFAULT_CENTER_Y = 996.5
+ID02_DEFAULT_DISTANCE_M = 10.0002
+ID02_DEFAULT_PIXEL_MM = 0.075
+ID02_DEFAULT_WAVELENGTH_A = 1.01402
+CENTER_X_KEYS = ("Center_1", "center_1", "CenterX", "center_x", "BeamCenterX", "Beam_x", "beam_x")
+CENTER_Y_KEYS = ("Center_2", "center_2", "CenterY", "center_y", "BeamCenterY", "Beam_y", "beam_y")
+
+
 # ============================================================
 # ==================== WAVELENGTH UTILS ======================
 # ============================================================
@@ -1076,7 +1085,7 @@ class RadialTab(QWidget):
         left_scroll = QScrollArea()
         left_scroll.setWidgetResizable(True)
         left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        left_scroll.setFixedWidth(330)
+        left_scroll.setFixedWidth(380)
 
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
@@ -1389,6 +1398,7 @@ class RadialTab(QWidget):
         spin.setRange(minimum, 1e12)
         spin.setValue(value)
         spin.setFixedHeight(24)
+        spin.setMinimumWidth(130)
         return spin
 
     def set_controls_enabled(self, enabled):
@@ -1631,7 +1641,7 @@ class RadialTab(QWidget):
 
     def apply_preset_from_file(self, file_path=None):
         header = {}
-        if file_path is not None and self.instrument_mode == "XENOCS":
+        if file_path is not None and self.instrument_mode in ("XENOCS", "ID02", "ID13"):
             try:
                 if file_path.suffix.lower() in [".h5", ".hdf5"]:
                     matching_edf = file_path.with_suffix(".edf")
@@ -1647,11 +1657,11 @@ class RadialTab(QWidget):
                 header = {}
 
         if self.instrument_mode == "XENOCS":
-            cx = get_header_float(header, "Center_1", "center_1")
-            cy = get_header_float(header, "Center_2", "center_2")
-            dist = get_header_float(header, "SampleDistance", "sample_distance")
-            px = get_header_float(header, "PSize_1", "PSize_X", "PixelSizeX")
-            py = get_header_float(header, "PSize_2", "PSize_Y", "PixelSizeY")
+            cx = get_header_float(header, *CENTER_X_KEYS)
+            cy = get_header_float(header, *CENTER_Y_KEYS)
+            dist = get_header_float(header, "SampleDistance", "sampledistance", "sample_distance")
+            px = get_header_float(header, "PSize_1", "psize_1", "PSize_X", "PixelSizeX")
+            py = get_header_float(header, "PSize_2", "psize_2", "PSize_Y", "PixelSizeY")
             wav = get_header_float(header, "WaveLength", "Wavelength", "wavelength")
 
             self.center_x.setValue(cx if cx is not None else 0)
@@ -1671,21 +1681,41 @@ class RadialTab(QWidget):
             return
 
         if self.instrument_mode == "ID02":
-            self.center_x.setValue(919.689)
-            self.center_y.setValue(994.290)
-            self.distance.setValue(1.0)
-            self.pixel_x.setValue(0.075000)
-            self.pixel_y.setValue(0.075000)
-            self.wavelength.setValue(1.0)
+            cx = get_header_float(header, *CENTER_X_KEYS)
+            cy = get_header_float(header, *CENTER_Y_KEYS)
+            dist = get_header_float(header, "SampleDistance", "sampledistance", "sample_distance")
+            px = get_header_float(header, "PSize_1", "psize_1", "PSize_X", "PixelSizeX")
+            py = get_header_float(header, "PSize_2", "psize_2", "PSize_Y", "PixelSizeY")
+            wav = get_header_float(header, "WaveLength", "Wavelength", "wavelength")
+            self.center_x.setValue(cx if cx is not None else ID02_DEFAULT_CENTER_X)
+            self.center_y.setValue(cy if cy is not None else ID02_DEFAULT_CENTER_Y)
+            self.distance.setValue(dist if dist is not None else ID02_DEFAULT_DISTANCE_M)
+            self.pixel_x.setValue(px * 1000 if px is not None else ID02_DEFAULT_PIXEL_MM)
+            self.pixel_y.setValue(py * 1000 if py is not None else ID02_DEFAULT_PIXEL_MM)
+            self.wavelength.setValue(wav * 1e10 if wav is not None else ID02_DEFAULT_WAVELENGTH_A)
             return
 
         if self.instrument_mode == "ID13":
-            self.center_x.setValue(1294.689)
-            self.center_y.setValue(1310.290)
-            self.distance.setValue(0.8)
-            self.pixel_x.setValue(0.075000)
-            self.pixel_y.setValue(0.075000)
-            self.wavelength.setValue(0.826563)
+            cx = get_header_float(header, *CENTER_X_KEYS)
+            cy = get_header_float(header, *CENTER_Y_KEYS)
+            dist = get_header_float(header, "SampleDistance", "sampledistance", "sample_distance")
+            px = get_header_float(header, "PSize_1", "psize_1", "PSize_X", "PixelSizeX")
+            py = get_header_float(header, "PSize_2", "psize_2", "PSize_Y", "PixelSizeY")
+            wav = get_header_float(header, "WaveLength", "Wavelength", "wavelength")
+            self.center_x.setValue(cx if cx is not None else 1294.689)
+            self.center_y.setValue(cy if cy is not None else 1310.290)
+            self.distance.setValue(dist if dist is not None else 0.8)
+            self.pixel_x.setValue(px * 1000 if px is not None else 0.075000)
+            self.pixel_y.setValue(py * 1000 if py is not None else 0.075000)
+            if wav is not None:
+                if wav < 1e-6:
+                    self.wavelength.setValue(wav * 1e10)
+                elif wav < 0.5:
+                    self.wavelength.setValue(wav * 10.0)
+                else:
+                    self.wavelength.setValue(wav)
+            else:
+                self.wavelength.setValue(0.826563)
             return
 
     def integrate_selected_files(self):

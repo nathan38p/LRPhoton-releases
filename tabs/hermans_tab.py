@@ -162,6 +162,8 @@ def read_h5_image(file_path, frame_index=0):
         dataset_name = find_h5_dataset(h5)
         dataset = h5[dataset_name]
         header = {"Dataset": dataset_name, "Shape": str(dataset.shape)}
+        for key, value in dataset.attrs.items():
+            header[key] = str(value)
 
         if dataset.ndim == 2:
             image = np.asarray(dataset[...], dtype=np.float64)
@@ -180,7 +182,30 @@ def read_h5_image(file_path, frame_index=0):
             raise ValueError("Only 2D and 3D H5 datasets are supported.")
 
     image[image > 4e9] = np.nan
+    add_matching_edf_center(header, file_path)
     return image, header
+
+
+def add_matching_edf_center(header, file_path):
+    edf_path = Path(file_path).with_suffix(".edf")
+    if not edf_path.exists():
+        return header
+
+    try:
+        _, edf_header = read_edf_file(edf_path)
+    except Exception:
+        return header
+
+    copied = False
+    for key in ["Center_1", "Center_2", "center_1", "center_2"]:
+        if key in edf_header and key not in header:
+            header[key] = edf_header[key]
+            copied = True
+
+    if copied:
+        header["Center source"] = edf_path.name
+
+    return header
 
 
 def count_h5_frames(file_path):
@@ -213,6 +238,15 @@ def header_float(header, keys, default):
             except Exception:
                 pass
     return default
+
+
+ID02_DEFAULT_CENTER_X = 914.4
+ID02_DEFAULT_CENTER_Y = 996.5
+ID02_DEFAULT_DISTANCE_M = 10.0002
+ID02_DEFAULT_PIXEL_MM = 0.075
+ID02_DEFAULT_WAVELENGTH_A = 1.01402
+CENTER_X_KEYS = ["Center_1", "center_1", "CenterX", "center_x", "BeamCenterX", "Beam_x", "beam_x"]
+CENTER_Y_KEYS = ["Center_2", "center_2", "CenterY", "center_y", "BeamCenterY", "Beam_y", "beam_y"]
 
 
 def q_map_from_geometry(shape, xc, yc, distance_m, pixel_x_mm, pixel_y_mm, wavelength_a):
@@ -1113,17 +1147,17 @@ class HermansTab(QWidget):
         header = self.current_header or {}
 
         if self.instrument_mode == "XENOCS":
-            x = header_float(header, ["Center_1", "CenterX", "BeamCenterX", "center_x"], 612.0)
-            y = header_float(header, ["Center_2", "CenterY", "BeamCenterY", "center_y"], 649.0)
+            x = header_float(header, CENTER_X_KEYS, 612.0)
+            y = header_float(header, CENTER_Y_KEYS, 649.0)
         elif self.instrument_mode == "ID02":
-            x = header_float(header, ["Center_1", "CenterX", "BeamCenterX", "center_x"], nx / 2)
-            y = header_float(header, ["Center_2", "CenterY", "BeamCenterY", "center_y"], ny / 2)
+            x = header_float(header, CENTER_X_KEYS, ID02_DEFAULT_CENTER_X)
+            y = header_float(header, CENTER_Y_KEYS, ID02_DEFAULT_CENTER_Y)
         elif self.instrument_mode == "ID13":
-            x = header_float(header, ["Center_1", "CenterX", "BeamCenterX", "center_x"], 1294.689)
-            y = header_float(header, ["Center_2", "CenterY", "BeamCenterY", "center_y"], 1310.290)
+            x = header_float(header, CENTER_X_KEYS, 1294.689)
+            y = header_float(header, CENTER_Y_KEYS, 1310.290)
         else:
-            x = self.center_x_spin.value() if self.center_x_spin.value() != 0 else header_float(header, ["Center_1", "CenterX", "BeamCenterX", "center_x"], nx / 2)
-            y = self.center_y_spin.value() if self.center_y_spin.value() != 0 else header_float(header, ["Center_2", "CenterY", "BeamCenterY", "center_y"], ny / 2)
+            x = self.center_x_spin.value() if self.center_x_spin.value() != 0 else header_float(header, CENTER_X_KEYS, nx / 2)
+            y = self.center_y_spin.value() if self.center_y_spin.value() != 0 else header_float(header, CENTER_Y_KEYS, ny / 2)
 
         self.set_center_spins(x, y)
 
@@ -1488,10 +1522,22 @@ class HermansTab(QWidget):
             self.apply_instrument_preset()
         xc = self.center_x_spin.value()
         yc = self.center_y_spin.value()
-        distance = header_float(header, ["SampleDistance", "Distance", "DetectorDistance"], 0.9)
-        pixel_x = header_float(header, ["PSize_1", "PixelSizeX", "pixel_x"], 0.075)
-        pixel_y = header_float(header, ["PSize_2", "PixelSizeY", "pixel_y"], 0.075)
-        wavelength = header_float(header, ["Wavelength", "wavelength"], 1.54189)
+        if self.instrument_mode == "ID02":
+            default_distance = ID02_DEFAULT_DISTANCE_M
+            default_pixel = ID02_DEFAULT_PIXEL_MM
+            default_wavelength = ID02_DEFAULT_WAVELENGTH_A
+        elif self.instrument_mode == "ID13":
+            default_distance = 0.8
+            default_pixel = 0.075
+            default_wavelength = 0.826563
+        else:
+            default_distance = 0.9
+            default_pixel = 0.075
+            default_wavelength = 1.54189
+        distance = header_float(header, ["SampleDistance", "sampledistance", "sample_distance", "Distance", "DetectorDistance"], default_distance)
+        pixel_x = header_float(header, ["PSize_1", "psize_1", "PixelSizeX", "pixel_x"], default_pixel)
+        pixel_y = header_float(header, ["PSize_2", "psize_2", "PixelSizeY", "pixel_y"], default_pixel)
+        wavelength = header_float(header, ["Wavelength", "wavelength"], default_wavelength)
 
         if pixel_x < 1e-3:
             pixel_x *= 1000
