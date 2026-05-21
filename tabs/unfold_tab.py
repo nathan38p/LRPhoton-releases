@@ -1,0 +1,442 @@
+import numpy as np
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QDoubleSpinBox,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QStyle,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
+
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+
+from .view_tab import ViewTab
+
+
+class UnfoldTab(ViewTab):
+    """View-like tab prepared for pattern unfolding workflows."""
+
+    def _build_ui(self):
+        super()._build_ui()
+        self._configure_unfold_toolbar()
+        self._configure_unfold_right_panel()
+
+    def _configure_unfold_toolbar(self):
+        self.unfold_save_button = QPushButton("Save")
+        self.unfold_save_button.setIcon(self.style().standardIcon(QStyle.SP_DialogSaveButton))
+        self.unfold_save_button.clicked.connect(self.save_png_image_only)
+
+        for action in list(self.toolbar.actions()):
+            if action.text() == "Save image only":
+                self.toolbar.removeAction(action)
+
+        for widget in [
+            self.log_checkbox,
+            self.keep_ratio_checkbox,
+            self.keep_zoom_checkbox,
+        ]:
+            self.toolbar_extra_layout.addWidget(widget, stretch=0)
+
+        self.toolbar_extra_layout.addStretch()
+        self.toolbar_extra_layout.addWidget(self.unfold_save_button, stretch=0)
+
+        if hasattr(self, "save_colorbar_checkbox"):
+            self.save_colorbar_checkbox.hide()
+
+    def _configure_unfold_right_panel(self):
+        self.info_box.setTitle("Parameters")
+        self.info_text.hide()
+        self._reorder_instrument_buttons()
+
+        self.display_box.setTitle("Pattern")
+        self._clear_layout(self.display_box_layout)
+        self._build_pattern_panel()
+
+        self._build_geometry_fields()
+
+        self.right_layout.removeWidget(self.info_box)
+        self.right_layout.removeWidget(self.display_box)
+        self.right_layout.insertWidget(0, self.display_box, stretch=1)
+        self.right_layout.insertWidget(1, self.info_box, stretch=0)
+
+        self.autoscale_button.setText("Auto")
+        self.autoscale_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.slider_box.addWidget(self.autoscale_button)
+
+        self.vmin_spin.hide()
+        self.vmax_spin.hide()
+        self.set_q_geometry_mode("ID13")
+
+    def _reorder_instrument_buttons(self):
+        buttons = [
+            self.q_xenocs_button,
+            self.q_id13_button,
+            self.q_id02_button,
+            self.q_custom_button,
+            self.q_manual_button,
+        ]
+        for button in buttons:
+            self.q_buttons_layout.removeWidget(button)
+        for button in buttons:
+            self.q_buttons_layout.addWidget(button)
+
+    def _clear_layout(self, layout):
+        while layout.count():
+            item = layout.takeAt(0)
+            child_layout = item.layout()
+            widget = item.widget()
+            if child_layout is not None:
+                self._clear_layout(child_layout)
+            if widget is not None:
+                widget.setParent(None)
+
+    def _build_pattern_panel(self):
+        self.pattern_fig = Figure(figsize=(3, 3))
+        self.pattern_fig.patch.set_facecolor("#f4f4f4")
+        self.pattern_ax = self.pattern_fig.add_subplot(111)
+        self.pattern_ax.set_axis_off()
+        self.pattern_canvas = FigureCanvas(self.pattern_fig)
+        self.pattern_canvas.setMinimumHeight(220)
+        self.display_box_layout.addWidget(self.pattern_canvas)
+        self.update_pattern_preview()
+
+    def _build_geometry_fields(self):
+        fields_box = QWidget()
+        form = QFormLayout(fields_box)
+        form.setContentsMargins(0, 4, 0, 0)
+        form.setSpacing(5)
+
+        self.geometry_fields = {}
+        labels = [
+            ("xc", "Centre X"),
+            ("yc", "Centre Y"),
+            ("distance_m", "Distance (m)"),
+            ("pixel_x_mm", "Pixel X (mm)"),
+            ("pixel_y_mm", "Pixel Y (mm)"),
+            ("wavelength_a", "Wavelength (Å)"),
+        ]
+
+        for key, label in labels:
+            spin = QDoubleSpinBox()
+            spin.setDecimals(16)
+            spin.setRange(0, 1e12)
+            spin.setFixedHeight(24)
+            spin.valueChanged.connect(self._geometry_field_changed)
+            self.geometry_fields[key] = spin
+            form.addRow(label, spin)
+
+        self.info_box_layout.addWidget(fields_box)
+        self.sync_geometry_fields()
+
+    def _geometry_field_changed(self):
+        if getattr(self, "_syncing_geometry_fields", False):
+            return
+
+        self.custom_q_geometry = {
+            key: spin.value()
+            for key, spin in self.geometry_fields.items()
+        }
+        self.save_custom_q_geometry()
+        if self.q_geometry_mode != "Custom":
+            self.q_geometry_mode = "Custom"
+            self.update_q_geometry_button_styles()
+        self.refresh_file_information()
+        self.update_image()
+
+    def set_q_geometry_mode(self, mode):
+        super().set_q_geometry_mode(mode)
+        self.sync_geometry_fields()
+        self.update_pattern_preview()
+
+    def open_q_geometry_dialog(self):
+        super().open_q_geometry_dialog()
+        self.sync_geometry_fields()
+        self.update_pattern_preview()
+
+    def use_custom_q_geometry_from_source(self):
+        super().use_custom_q_geometry_from_source()
+        self.sync_geometry_fields()
+        self.update_pattern_preview()
+
+    def update_file_information(self, file_type, dataset_name, n_frames, image_shape):
+        super().update_file_information(file_type, dataset_name, n_frames, image_shape)
+        self.sync_geometry_fields()
+        self.update_pattern_preview()
+
+    def update_image(self):
+        image = self.get_current_image()
+        if image is None:
+            return
+
+        unfolded_raw, unfolded_display, q_max = self.make_unfolded_images(image)
+        if unfolded_raw is None:
+            super().update_image()
+            self.update_pattern_preview()
+            return
+
+        self.raw_current_img = unfolded_raw
+        self.display_img = unfolded_display
+        self.unfold_q_max = q_max
+        aspect = "auto"
+        extent = [0.0, q_max, 0.0, 360.0]
+
+        if self.image_artist is None:
+            self.image_artist = self.ax.imshow(
+                self.display_img,
+                cmap="jet",
+                origin="lower",
+                extent=extent,
+                vmin=self.vmin_spin.value(),
+                vmax=self.vmax_spin.value(),
+                aspect=aspect,
+            )
+            self.ax.set_aspect(aspect)
+            self.ax.set_xlabel("q (nm⁻¹)")
+            self.ax.set_ylabel("Angle (°)")
+            self.ax.set_axis_on()
+            self.colorbar = self.fig.colorbar(
+                self.image_artist,
+                ax=self.ax,
+                fraction=0.046,
+                pad=0.04,
+            )
+            self.fig.subplots_adjust(left=0.08, right=0.92, top=0.98, bottom=0.08)
+        else:
+            self.image_artist.set_data(self.display_img)
+            self.image_artist.set_extent(extent)
+            self.image_artist.set_clim(self.vmin_spin.value(), self.vmax_spin.value())
+            self.ax.set_aspect(aspect)
+            self.ax.set_xlabel("q (nm⁻¹)")
+            self.ax.set_ylabel("Angle (°)")
+            self.ax.set_axis_on()
+
+        if self.keep_zoom_checkbox.isChecked() and self._saved_xlim is not None and self._saved_ylim is not None:
+            self.ax.set_xlim(self._saved_xlim)
+            self.ax.set_ylim(self._saved_ylim)
+        else:
+            self.ax.set_xlim(0.0, q_max)
+            self.ax.set_ylim(0.0, 360.0)
+
+        total = self.n_frames if self.is_lazy_h5 else self.images.shape[0]
+        self.frame_label.setText(f"{self.current_index + 1} / {total}")
+
+        self.ax.set_autoscale_on(False)
+        self.canvas.draw_idle()
+        self.update_pattern_preview()
+
+    def draw_center_cross(self):
+        super().draw_center_cross()
+        self.draw_unfold_axes()
+
+    def make_unfolded_images(self, image):
+        geometry = self.get_q_geometry_from_header()
+        if geometry is None:
+            return None, None, None
+
+        xc, yc, distance_m, pixel_x_mm, pixel_y_mm, wavelength_nm = geometry
+        if distance_m <= 0 or pixel_x_mm <= 0 or pixel_y_mm <= 0 or wavelength_nm <= 0:
+            return None, None, None
+
+        raw = np.asarray(image, dtype=float)
+        raw = raw.copy()
+        raw[raw > 4e9] = np.nan
+        display = self.prepare_display_image(raw)
+        ny, nx = raw.shape
+
+        corners = np.array(
+            [
+                [0.0, 0.0],
+                [nx - 1.0, 0.0],
+                [0.0, ny - 1.0],
+                [nx - 1.0, ny - 1.0],
+            ]
+        )
+        dx_m = (corners[:, 0] - xc) * pixel_x_mm * 1e-3
+        dy_m = (corners[:, 1] - yc) * pixel_y_mm * 1e-3
+        r_m = np.sqrt(dx_m ** 2 + dy_m ** 2)
+        two_theta = np.arctan2(r_m, distance_m)
+        q_max = float(np.nanmax((4.0 * np.pi / wavelength_nm) * np.sin(two_theta / 2.0)))
+        if not np.isfinite(q_max) or q_max <= 0:
+            return None, None, None
+
+        angle_bins = 720
+        q_bins = int(np.clip(max(nx, ny), 256, 1400))
+        angles = np.linspace(0.0, 360.0, angle_bins, endpoint=False)
+        q_values = np.linspace(0.0, q_max, q_bins)
+
+        theta = -np.deg2rad(angles)[None, :]
+        q_grid = q_values[:, None]
+        argument = np.clip(q_grid * wavelength_nm / (4.0 * np.pi), -1.0, 1.0)
+        two_theta_grid = 2.0 * np.arcsin(argument)
+        radius_m = distance_m * np.tan(two_theta_grid)
+
+        x = xc + (radius_m * np.cos(theta)) / (pixel_x_mm * 1e-3)
+        y = yc + (radius_m * np.sin(theta)) / (pixel_y_mm * 1e-3)
+
+        x_index = np.rint(x).astype(int)
+        y_index = np.rint(y).astype(int)
+        inside = (x_index >= 0) & (x_index < nx) & (y_index >= 0) & (y_index < ny)
+
+        unfolded_raw = np.full((q_bins, angle_bins), np.nan, dtype=float)
+        unfolded_display = np.full((q_bins, angle_bins), np.nan, dtype=float)
+        unfolded_raw[inside] = raw[y_index[inside], x_index[inside]]
+        unfolded_display[inside] = display[y_index[inside], x_index[inside]]
+        return unfolded_raw.T, unfolded_display.T, q_max
+
+    def sync_geometry_fields(self):
+        if not hasattr(self, "geometry_fields"):
+            return
+
+        values = self.q_geometry_values_for_mode() or self.preset_q_geometry(self.q_geometry_mode) or {}
+        self._syncing_geometry_fields = True
+        try:
+            for key, spin in self.geometry_fields.items():
+                spin.blockSignals(True)
+                spin.setValue(float(values.get(key, 0.0) or 0.0))
+                spin.blockSignals(False)
+        finally:
+            self._syncing_geometry_fields = False
+
+    def q_geometry_values_for_mode(self):
+        if self.q_geometry_mode == "ID13":
+            return self.preset_q_geometry("ID13")
+        return super().q_geometry_values_for_mode()
+
+    def draw_unfold_axes(self):
+        values = self.q_geometry_values_for_mode()
+        if not values:
+            return
+
+        xc = values.get("xc")
+        yc = values.get("yc")
+        if xc is None or yc is None:
+            return
+
+        xlim = self.ax.get_xlim()
+        ylim = self.ax.get_ylim()
+        radius = 0.48 * min(abs(xlim[1] - xlim[0]), abs(ylim[1] - ylim[0]))
+        if not np.isfinite(radius) or radius <= 0:
+            return
+
+        for angle in range(0, 360, 45):
+            theta = np.deg2rad(angle)
+            x2 = xc + radius * np.cos(theta)
+            y2 = yc + radius * np.sin(theta)
+            line = self.ax.plot([xc, x2], [yc, y2], color="white", linewidth=0.8, alpha=0.75)[0]
+            label = self.ax.text(
+                x2,
+                y2,
+                f"{angle}°",
+                color="white",
+                fontsize=8,
+                ha="center",
+                va="center",
+                bbox={"facecolor": "black", "alpha": 0.45, "edgecolor": "none", "pad": 1.5},
+            )
+            self.center_artists.extend([line, label])
+
+    def update_pattern_preview(self):
+        if not hasattr(self, "pattern_ax"):
+            return
+
+        self.pattern_ax.clear()
+        self.pattern_ax.set_axis_off()
+        image = self.get_current_image()
+
+        if image is None:
+            self.pattern_ax.text(
+                0.5,
+                0.5,
+                "No file loaded",
+                ha="center",
+                va="center",
+                fontsize=10,
+                color="#555555",
+                transform=self.pattern_ax.transAxes,
+            )
+            self.pattern_canvas.draw_idle()
+            return
+
+        preview = np.asarray(image, dtype=float)
+        if self.log_checkbox.isChecked():
+            preview = np.log10(np.clip(preview, 0, None) + 1)
+
+        self.pattern_ax.imshow(
+            preview,
+            cmap="jet",
+            origin="upper",
+            vmin=self.vmin_spin.value(),
+            vmax=self.vmax_spin.value(),
+        )
+
+        values = self.q_geometry_values_for_mode()
+        if values:
+            xc = values.get("xc")
+            yc = values.get("yc")
+            if xc is not None and yc is not None:
+                ny, nx = preview.shape
+                radius = 0.45 * min(nx, ny)
+                self.pattern_ax.plot(xc, yc, "o", ms=4, mfc="white", mec="#d71920", mew=1)
+                for angle in range(0, 360, 45):
+                    theta = np.deg2rad(angle)
+                    x2 = xc + radius * np.cos(theta)
+                    y2 = yc + radius * np.sin(theta)
+                    self.pattern_ax.plot([xc, x2], [yc, y2], color="#d71920", lw=0.8, alpha=0.9)
+                    self.pattern_ax.text(
+                        x2,
+                        y2,
+                        f"{angle}°",
+                        color="white",
+                        fontsize=7,
+                        ha="center",
+                        va="center",
+                        bbox={"facecolor": "black", "alpha": 0.5, "edgecolor": "none", "pad": 1},
+                    )
+
+        self.pattern_fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
+        self.pattern_canvas.draw_idle()
+
+    def on_mouse_move(self, event):
+        if self.pan_image_from_motion(event):
+            return
+        if self.raw_current_img is None or event.inaxes != self.ax or event.xdata is None or event.ydata is None:
+            self.cursor_label.setText("q = - | angle = - | I = -")
+            return
+
+        q_value = float(event.xdata)
+        angle = float(event.ydata) % 360.0
+        angle_bins, q_bins = self.raw_current_img.shape
+        y_index = int(np.floor(angle / 360.0 * angle_bins))
+        q_max = getattr(self, "unfold_q_max", None)
+        if q_max is None or q_max <= 0:
+            self.cursor_label.setText("q = - | angle = - | I = -")
+            return
+
+        x_index = int(round(q_value / q_max * (q_bins - 1)))
+        if not (0 <= x_index < q_bins and 0 <= y_index < angle_bins):
+            self.cursor_label.setText("q = - | angle = - | I = -")
+            return
+
+        value = self.raw_current_img[y_index, x_index]
+        if np.isnan(value):
+            value_text = "NaN"
+        elif np.isposinf(value):
+            value_text = "+Inf"
+        elif np.isneginf(value):
+            value_text = "-Inf"
+        else:
+            value_text = f"{value:.8g}"
+
+        self.cursor_label.setText(
+            f"q = {q_value:.6g} nm⁻¹ | angle = {angle:.3f}° | I = {value_text}"
+        )
+
+    def on_mouse_leave(self, event):
+        self.cursor_label.setText("q = - | angle = - | I = -")

@@ -1,0 +1,67 @@
+{
+  "directed": true,
+  "multigraph": false,
+  "graph": {
+    "id": "integrate_scan_with_saving",
+    "label": "Ewoks workflow 'integrate_scan_with_saving'",
+    "schema_version": "1.0"
+  },
+  "nodes": [
+    {
+      "task_type": "class",
+      "task_identifier": "ewoksxrpd.tasks.pyfaiconfig.PyFaiConfig",
+      "label": "config",
+      "ows": {
+        "title": "config",
+        "name": "PyFaiConfig",
+        "position": "(214.0, 225.0)",
+        "version": ""
+      },
+      "id": "0"
+    },
+    {
+      "task_type": "class",
+      "task_identifier": "ewoksxrpd.tasks.integrate.IntegrateBlissScan",
+      "label": "integrate",
+      "ows": {
+        "title": "integrate",
+        "name": "IntegrateBlissScan",
+        "position": "(447.0, 225.0)",
+        "version": ""
+      },
+      "id": "1"
+    }
+  ],
+  "links": [
+    {
+      "data_mapping": [
+        {
+          "source_output": "detector_config",
+          "target_input": "detector_config"
+        },
+        {
+          "source_output": "energy",
+          "target_input": "energy"
+        },
+        {
+          "source_output": "integration_options",
+          "target_input": "integration_options"
+        },
+        {
+          "source_output": "detector",
+          "target_input": "detector"
+        },
+        {
+          "source_output": "mask",
+          "target_input": "mask"
+        },
+        {
+          "source_output": "geometry",
+          "target_input": "geometry"
+        }
+      ],
+      "source": "0",
+      "target": "1"
+    }
+  ]
+}

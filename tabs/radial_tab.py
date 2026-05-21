@@ -1,3 +1,4 @@
+import json
 import re
 from pathlib import Path
 
@@ -264,6 +265,7 @@ ID02_DEFAULT_PIXEL_MM = 0.075
 ID02_DEFAULT_WAVELENGTH_A = 1.01402
 CENTER_X_KEYS = ("Center_1", "center_1", "CenterX", "center_x", "BeamCenterX", "Beam_x", "beam_x")
 CENTER_Y_KEYS = ("Center_2", "center_2", "CenterY", "center_y", "BeamCenterY", "Beam_y", "beam_y")
+ID13_CONFIG_PATH = Path(__file__).resolve().parent.parent / "id13" / "config_udetx_m800.json"
 
 
 # ============================================================
@@ -353,6 +355,220 @@ def q_geometry_diagnostics(image, xc, yc, distance_m, pixel_x_mm, pixel_y_mm, wa
         "q_corner_min": float(np.nanmin(q_corners)),
         "q_corner_max": float(np.nanmax(q_corners)),
     }
+
+
+def load_id13_pyfai_config():
+    """Load the ID13 pyFAI JSON saved next to the example workflow."""
+    fallback = {
+        "poni": {
+            "dist": ID13_DEFAULT_DISTANCE_M,
+            "poni1": ID13_DEFAULT_CENTER_Y * ID13_DEFAULT_PIXEL_MM * 1e-3,
+            "poni2": ID13_DEFAULT_CENTER_X * ID13_DEFAULT_PIXEL_MM * 1e-3,
+            "rot1": 0.0,
+            "rot2": 0.0,
+            "rot3": 0.0,
+            "wavelength": ID13_DEFAULT_WAVELENGTH_A * 1e-10,
+        },
+        "nbpt_rad": 1400,
+        "unit": "q_nm^-1",
+        "polarization_description": [0.99, 0.0],
+        "correct_solid_angle": True,
+        "radial_range": None,
+    }
+
+    if not ID13_CONFIG_PATH.exists():
+        return fallback
+
+    try:
+        with open(ID13_CONFIG_PATH, "r", encoding="utf-8") as file:
+            config = json.load(file)
+    except Exception:
+        return fallback
+
+    merged = dict(fallback)
+    merged.update(config)
+    merged["poni"] = {**fallback["poni"], **config.get("poni", {})}
+    return merged
+
+
+def id13_pyfai_q_map(image_shape, config):
+    """
+    Compute the q map from the pyFAI PONI geometry used by the ID13 workflow.
+
+    The provided ID13 config has no detector rotations, so the workflow q vector
+    reduces to pyFAI's PONI metric geometry in detector space.
+    """
+    poni = config["poni"]
+    distance_m = float(poni["dist"])
+    poni1_m = float(poni["poni1"])
+    poni2_m = float(poni["poni2"])
+    wavelength_nm = wavelength_to_nm(float(poni["wavelength"]))
+
+    ny, nx = image_shape
+    y, x = np.indices((ny, nx))
+    pixel_m = ID13_DEFAULT_PIXEL_MM * 1e-3
+    pixel1_m = float(config.get("pixel1_m", pixel_m))
+    pixel2_m = float(config.get("pixel2_m", pixel_m))
+
+    d1_m = y * pixel1_m - poni1_m
+    d2_m = x * pixel2_m - poni2_m
+    r_m = np.sqrt(d1_m ** 2 + d2_m ** 2)
+    two_theta = np.arctan2(r_m, distance_m)
+    q = (4.0 * np.pi / wavelength_nm) * np.sin(two_theta / 2.0)
+    chi = np.arctan2(d1_m, d2_m)
+    return q, two_theta, chi
+
+
+def id13_solid_angle_correction(two_theta):
+    # pyFAI's flat-detector solid angle term is normalized to 1 at the PONI.
+    return np.cos(two_theta) ** 3
+
+
+def id13_polarization_correction(two_theta, chi, config):
+    description = config.get("polarization_description")
+    if not description:
+        return 1.0
+
+    factor = float(description[0])
+    axis_offset = float(description[1]) if len(description) > 1 else 0.0
+    sin_tth = np.sin(two_theta)
+    cos_tth_sq = np.cos(two_theta) ** 2
+    cos_2chi = np.cos(2.0 * (chi - axis_offset))
+    correction = 0.5 * (1.0 + cos_tth_sq - factor * cos_2chi * sin_tth ** 2)
+    return np.clip(correction, 1e-12, None)
+
+
+def id13_pyfai_like_average(image, q_min, q_max, sector_min=0, sector_max=360):
+    """
+    Local comparison profile based on the ID13 pyFAI JSON.
+
+    It mirrors the relevant workflow options available in config_udetx_m800.json:
+    PONI geometry, q_nm^-1 unit, nbpt_rad, optional radial range, solid-angle
+    correction and polarization correction. Pixel splitting/OpenCL are pyFAI
+    implementation details and are approximated here with center-of-pixel bins.
+    """
+    config = load_id13_pyfai_config()
+    exact = id13_pyfai_exact_average(image, q_min, q_max, sector_min, sector_max, config)
+    if exact is not None:
+        return exact
+
+    if config.get("unit") != "q_nm^-1":
+        raise ValueError(f"Unsupported ID13 pyFAI unit: {config.get('unit')}")
+
+    q, two_theta, chi = id13_pyfai_q_map(image.shape, config)
+    intensity = image.astype(np.float64)
+
+    if config.get("correct_solid_angle", False):
+        intensity = intensity / np.clip(id13_solid_angle_correction(two_theta), 1e-12, None)
+
+    intensity = intensity / id13_polarization_correction(two_theta, chi, config)
+
+    psi = (np.degrees(chi) + 360.0) % 360.0
+    sector_min = sector_min % 360.0
+    sector_max = sector_max % 360.0
+    if abs((sector_max - sector_min) % 360.0) < 1e-9:
+        sector_mask = np.ones_like(psi, dtype=bool)
+    elif sector_min <= sector_max:
+        sector_mask = (psi >= sector_min) & (psi <= sector_max)
+    else:
+        sector_mask = (psi >= sector_min) | (psi <= sector_max)
+
+    radial_range = config.get("radial_range")
+    if radial_range and len(radial_range) == 2:
+        q_min_eff, q_max_eff = map(float, radial_range)
+    else:
+        q_min_eff, q_max_eff = float(q_min), float(q_max)
+
+    valid = np.isfinite(q) & (q > 0) & np.isfinite(intensity) & (intensity < 4e9) & (intensity > 0) & sector_mask
+    if q_min_eff > 0:
+        valid &= q >= q_min_eff
+    if q_max_eff > 0:
+        valid &= q <= q_max_eff
+
+    q_values = q[valid]
+    i_values = intensity[valid]
+    if q_values.size == 0:
+        raise ValueError("No valid pixel found for the ID13 pyFAI comparison.")
+
+    q_min_eff = q_min_eff if q_min_eff > 0 else float(np.nanmin(q_values))
+    q_max_eff = q_max_eff if q_max_eff > 0 else float(np.nanmax(q_values))
+    if q_max_eff <= q_min_eff:
+        raise ValueError("ID13 pyFAI q max must be greater than q min.")
+
+    n_bins = int(config.get("nbpt_rad", 1400))
+    edges = np.linspace(q_min_eff, q_max_eff, n_bins + 1)
+    q_axis = 0.5 * (edges[:-1] + edges[1:])
+    sums, _ = np.histogram(q_values, bins=edges, weights=i_values)
+    counts, _ = np.histogram(q_values, bins=edges)
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        averaged = sums / counts
+
+    valid_bins = (counts > 0) & np.isfinite(averaged) & (averaged > 0)
+    return q_axis[valid_bins], averaged[valid_bins], counts[valid_bins], config
+
+
+def id13_pyfai_exact_average(image, q_min, q_max, sector_min, sector_max, config):
+    """Use pyFAI itself when it is installed; otherwise let the local fallback run."""
+    try:
+        import pyFAI
+    except Exception:
+        return None
+
+    if not ID13_CONFIG_PATH.exists():
+        return None
+
+    try:
+        integrator = pyFAI.load(str(ID13_CONFIG_PATH))
+        radial_range = config.get("radial_range")
+        if radial_range and len(radial_range) == 2:
+            radial_range = tuple(map(float, radial_range))
+        elif q_min > 0 or q_max > 0:
+            radial_range = (
+                float(q_min) if q_min > 0 else None,
+                float(q_max) if q_max > 0 else None,
+            )
+            if radial_range[0] is None or radial_range[1] is None:
+                radial_range = None
+        else:
+            radial_range = None
+
+        azimuth_range = config.get("azimuth_range")
+        if azimuth_range is None and abs((sector_max - sector_min) % 360.0) >= 1e-9:
+            azimuth_range = (float(sector_min), float(sector_max))
+
+        polarization = config.get("polarization_description")
+        polarization_factor = float(polarization[0]) if polarization else None
+        method = config.get("method")
+        if isinstance(method, list):
+            method = tuple(method)
+
+        result = integrator.integrate1d(
+            image,
+            int(config.get("nbpt_rad", 1400)),
+            unit=config.get("unit", "q_nm^-1"),
+            radial_range=radial_range,
+            azimuth_range=azimuth_range,
+            correctSolidAngle=bool(config.get("correct_solid_angle", False)),
+            polarization_factor=polarization_factor,
+            dummy=config.get("val_dummy"),
+            delta_dummy=config.get("delta_dummy"),
+            method=method,
+        )
+
+        if hasattr(result, "radial") and hasattr(result, "intensity"):
+            q_axis = np.asarray(result.radial, dtype=np.float64)
+            intensity = np.asarray(result.intensity, dtype=np.float64)
+        else:
+            q_axis = np.asarray(result[0], dtype=np.float64)
+            intensity = np.asarray(result[1], dtype=np.float64)
+        valid = np.isfinite(q_axis) & np.isfinite(intensity) & (intensity > 0)
+        counts = np.ones(int(np.count_nonzero(valid)), dtype=int)
+        config = dict(config)
+        config["used_pyfai"] = True
+        return q_axis[valid], intensity[valid], counts, config
+    except Exception:
+        return None
 
 
 # ============================================================
@@ -1001,6 +1217,7 @@ class RadialTab(QWidget):
         self.current_files = []
         self.instrument_mode = "XENOCS"
         self.last_results = {}
+        self.last_comparison_results = {}
         self.h5_dataset_name = None
         self.h5_frame_axis = None
         self.h5_n_frames = 1
@@ -1191,6 +1408,9 @@ class RadialTab(QWidget):
         self.use_q_range.stateChanged.connect(self.update_mask_parameter_state)
         self.q_min = self.double_spin(0, decimals=6, minimum=0)
         self.q_max = self.double_spin(0, decimals=6, minimum=0)
+        self.use_id13_pyfai_comparison = QCheckBox("ID13 pyFAI comparison")
+        self.use_id13_pyfai_comparison.setChecked(False)
+        self.use_id13_pyfai_comparison.stateChanged.connect(self.update_id13_comparison)
 
         self.use_sector = QCheckBox("Use azimuthal sector")
         self.use_sector.setChecked(False)
@@ -1217,6 +1437,7 @@ class RadialTab(QWidget):
         form.addWidget(self.pixel_y, 4, 1)
         form.addWidget(QLabel("Wavelength (Å):"), 5, 0)
         form.addWidget(self.wavelength, 5, 1)
+        form.addWidget(self.use_id13_pyfai_comparison, 6, 0, 1, 2)
 
         self.frame_label = QLabel("H5 frame:")
         self.frame_spin = QSpinBox()
@@ -1416,7 +1637,7 @@ class RadialTab(QWidget):
             self.wavelength, self.frame_spin, self.frame_start_spin, self.frame_end_spin,
             self.frame_slider, self.prev_frame_button, self.next_frame_button,
             self.use_q_range, self.q_min, self.q_max, self.use_sector,
-            self.sector_min, self.sector_max,
+            self.sector_min, self.sector_max, self.use_id13_pyfai_comparison,
             self.n_bins, self.plot_mode, self.integrate_button, self.save_button,
             self.image_vmin_slider, self.image_vmax_slider,
         ]:
@@ -1726,6 +1947,7 @@ class RadialTab(QWidget):
         previous_yscale = ax.get_yscale() if preserve_view else None
 
         self.last_results = {}
+        self.last_comparison_results = {}
         ax.clear()
 
         messages = []
@@ -1788,6 +2010,41 @@ class RadialTab(QWidget):
                 line, = ax.plot(x, y, linewidth=1.2, label=file_path.stem)
                 self.last_results[file_path.stem] = (q, intensity, counts)
 
+                comparison_message = None
+                if self.use_id13_pyfai_comparison.isChecked():
+                    try:
+                        q_id13, intensity_id13, counts_id13, id13_config = id13_pyfai_like_average(
+                            image,
+                            q_min,
+                            q_max,
+                            sector_min,
+                            sector_max,
+                        )
+                        id13_label = f"{file_path.stem} ID13 pyFAI"
+                        id13_wavelength = id13_config["poni"]["wavelength"]
+                        ax.plot(
+                            self.make_plot_x(q_id13, id13_wavelength),
+                            self.make_plot_y(q_id13, intensity_id13),
+                            linewidth=1.1,
+                            linestyle="--",
+                            color=line.get_color(),
+                            label=id13_label,
+                        )
+                        self.last_comparison_results[id13_label] = (
+                            q_id13,
+                            intensity_id13,
+                            counts_id13,
+                            id13_wavelength,
+                        )
+                        comparison_source = "pyFAI integrate1d" if id13_config.get("used_pyfai") else "local pyFAI-compatible"
+                        comparison_message = (
+                            f"  ID13 pyFAI comparison = {q_id13.size} bins from {ID13_CONFIG_PATH.name}"
+                            f" ; q range = {np.nanmin(q_id13):.10g} -> {np.nanmax(q_id13):.10g} nm⁻¹"
+                            f" ; {comparison_source} ; solid angle/polarization corrected"
+                        )
+                    except Exception as comparison_error:
+                        comparison_message = f"  ID13 pyFAI comparison error: {comparison_error}"
+
                 if file_path == files[0]:
                     self.image_canvas.set_q_map(q_map)
                     self.image_canvas.show_image(image, self.center_x.value(), self.center_y.value(), mask=mask)
@@ -1802,6 +2059,8 @@ class RadialTab(QWidget):
                     f"  exported q range = {np.nanmin(q):.10g} -> {np.nanmax(q):.10g} nm⁻¹"
                     f" ; arithmetic mean ; invalid pixels excluded ; no smoothing"
                 )
+                if comparison_message is not None:
+                    messages.append(comparison_message)
 
             except Exception as error:
                 messages.append(f"Error: {file_path.name}: {error}")
@@ -1824,10 +2083,10 @@ class RadialTab(QWidget):
         self.log_box.setPlainText("\n".join(messages))
 
 
-    def make_plot_x(self, q):
+    def make_plot_x(self, q, wavelength_value=None):
         mode = self.plot_mode.currentText()
         if mode in ["2θ linear", "2θ log"]:
-            return q_nm_to_two_theta_deg(q, self.wavelength.value())
+            return q_nm_to_two_theta_deg(q, self.wavelength.value() if wavelength_value is None else wavelength_value)
         return q
 
 
@@ -1886,11 +2145,19 @@ class RadialTab(QWidget):
                 q, intensity, counts = self.last_results[label]
                 line.set_xdata(self.make_plot_x(q))
                 line.set_ydata(self.make_plot_y(q, intensity))
+            elif label in self.last_comparison_results:
+                q, intensity, counts, wavelength = self.last_comparison_results[label]
+                line.set_xdata(self.make_plot_x(q, wavelength))
+                line.set_ydata(self.make_plot_y(q, intensity))
 
         self.apply_plot_axes()
         self.canvas.ax.relim()
         self.canvas.ax.autoscale_view()
         self.canvas.draw_idle()
+
+    def update_id13_comparison(self):
+        if self.selected_files() and self.last_results:
+            self.integrate_selected_files()
 
 
     def update_graph_coordinates(self, event):

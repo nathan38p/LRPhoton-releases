@@ -383,7 +383,12 @@ class ViewTab(QWidget):
             if action.text().lower() in ["save", "save the figure"]:
                 self.toolbar.removeAction(action)
 
-        toolbar_layout.addWidget(self.toolbar, alignment=Qt.AlignVCenter)
+        self.toolbar_extra_layout = QHBoxLayout()
+        self.toolbar_extra_layout.setContentsMargins(0, 0, 0, 0)
+        self.toolbar_extra_layout.setSpacing(8)
+        self.toolbar_extra_layout.addWidget(self.toolbar, stretch=1, alignment=Qt.AlignVCenter)
+
+        toolbar_layout.addLayout(self.toolbar_extra_layout)
 
         center_layout.addWidget(toolbar_box, alignment=Qt.AlignTop)
 
@@ -393,6 +398,7 @@ class ViewTab(QWidget):
         image_area.addWidget(self.canvas)
 
         slider_box = QVBoxLayout()
+        self.slider_box = slider_box
         slider_box.setContentsMargins(0, 0, 0, 0)
         slider_box.setSpacing(2)
 
@@ -509,6 +515,7 @@ class ViewTab(QWidget):
         self.vmax_spin.valueChanged.connect(self.spin_intensity_changed)
 
         autoscale_button = QPushButton("Auto intensity")
+        self.autoscale_button = autoscale_button
         autoscale_button.clicked.connect(self.auto_intensity)
 
         display_layout.addWidget(self.log_checkbox)
@@ -536,8 +543,10 @@ class ViewTab(QWidget):
         right_layout.setSpacing(4)
 
         info_box = QGroupBox("File information")
+        self.info_box = info_box
+        self.right_layout = right_layout
         info_box.setMinimumHeight(86)
-        info_box.setStyleSheet("""
+        self.panel_box_style = """
             QGroupBox {
                 background-color: #f4f4f4;
                 border: 0px;
@@ -554,8 +563,10 @@ class ViewTab(QWidget):
                 color: #222222;
                 font-size: 12px;
             }
-        """)
+        """
+        info_box.setStyleSheet(self.panel_box_style)
         info_box_layout = QVBoxLayout(info_box)
+        self.info_box_layout = info_box_layout
         info_box_layout.setContentsMargins(6, 18, 6, 4)
         info_box_layout.setSpacing(4)
 
@@ -572,6 +583,7 @@ class ViewTab(QWidget):
         info_box_layout.addWidget(self.info_text)
 
         q_buttons_layout = QHBoxLayout()
+        self.q_buttons_layout = q_buttons_layout
         q_buttons_layout.setSpacing(4)
         self.q_xenocs_button = QPushButton("XENOCS")
         self.q_id02_button = QPushButton("ID02")
@@ -608,6 +620,7 @@ class ViewTab(QWidget):
         right_layout.addWidget(info_box)
 
         display_box = QGroupBox("Display settings")
+        self.display_box = display_box
         display_box.setStyleSheet("""
             QGroupBox {
                 background-color: #f4f4f4;
@@ -639,6 +652,7 @@ class ViewTab(QWidget):
         """)
 
         display_box_layout = QVBoxLayout(display_box)
+        self.display_box_layout = display_box_layout
         display_box_layout.setContentsMargins(10, 22, 10, 10)
         display_box_layout.setSpacing(12)
 
@@ -2210,6 +2224,9 @@ class ViewTab(QWidget):
         if self.image_artist is None or event.inaxes != self.ax:
             return
 
+        if self.toolbar_interaction_active():
+            return
+
         if event.xdata is None or event.ydata is None:
             return
 
@@ -2218,6 +2235,9 @@ class ViewTab(QWidget):
 
     def on_mouse_press(self, event):
         if self.image_artist is None or event.inaxes != self.ax:
+            return
+
+        if self.toolbar_interaction_active():
             return
 
         if event.button != 1:
@@ -2240,6 +2260,9 @@ class ViewTab(QWidget):
         self.canvas.setCursor(Qt.ArrowCursor)
 
     def pan_image_from_motion(self, event):
+        if self.toolbar_interaction_active():
+            return False
+
         if not self._is_panning:
             return False
 
@@ -2265,3 +2288,14 @@ class ViewTab(QWidget):
         self.ax.set_autoscale_on(False)
         self.canvas.draw_idle()
         return True
+
+    def toolbar_interaction_active(self):
+        toolbar = getattr(self, "toolbar", None)
+        if toolbar is None:
+            return False
+
+        mode = getattr(toolbar, "mode", "")
+        try:
+            return bool(mode)
+        except Exception:
+            return str(mode).strip() != ""

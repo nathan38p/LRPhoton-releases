@@ -1,0 +1,87 @@
+{
+  "endtime": null,
+  "runstatus": null,
+  "datacollectionid": 151980,
+  "datacollectionnumber": null,
+  "datacollectiongroupid": 127334,
+  "imagedirectory": "/data/visitor/sc5729/id13/20251202/RAW_DATA/dq_p1_s1/dq_p1_s1_roi133059_151980",
+  "filetemplate": "dq_p1_s1_roi133059_151980.h5",
+  "subsampleid": 133059,
+  "steps_x": "500",
+  "step_size_x": 2.0,
+  "steps_y": "10",
+  "step_size_y": 200.0,
+  "dwell": 0.02,
+  "enqueue": true,
+  "estimate": 150.00000000000006,
+  "continuous": true,
+  "fast_axis": "Horizontal",
+  "detectors": [
+    "eiger",
+    "p201_eh2_0"
+  ],
+  "beamlineparams": {},
+  "hardware_saving": false,
+  "actor": "kmap",
+  "component": "daiquiri.core.components.imageviewer",
+  "sampleid": 10393,
+  "sample": "dq_p1_s1",
+  "extrametadata": {
+    "subsample": null
+  },
+  "sessionid": 5319,
+  "containerqueuesampleid": 144085,
+  "datacollectionplanid": 144099,
+  "absol": {
+    "fixed": {},
+    "variable": {
+      "x": {
+        "motor": "<Bliss: ustry (Motor/Axis)>",
+        "destination": [
+          -15.543393000000002,
+          -14.543393000000002
+        ],
+        "unit": "mm",
+        "unit_exponent": 0.001
+      },
+      "y": {
+        "motor": "<Bliss: ustrz (Motor/Axis)>",
+        "destination": [
+          -4.883796,
+          -2.8837960000000002
+        ],
+        "unit": "mm",
+        "unit_exponent": 0.001
+      }
+    },
+    "axes": {
+      "x": {
+        "motor": "<Bliss: ustry (Motor/Axis)>",
+        "destination": [
+          -15.543393000000002,
+          -14.543393000000002
+        ],
+        "unit": "mm",
+        "unit_exponent": 0.001
+      },
+      "y": {
+        "motor": "<Bliss: ustrz (Motor/Axis)>",
+        "destination": [
+          -4.883796,
+          -2.8837960000000002
+        ],
+        "unit": "mm",
+        "unit_exponent": 0.001
+      }
+    },
+    "positions": {
+      "ustrx": "3.5011"
+    }
+  },
+  "beamsize": {
+    "x": 2500.0,
+    "y": 2500.0,
+    "z": 1000.0
+  },
+  "metadata_techniques": "S-XRD"
+}

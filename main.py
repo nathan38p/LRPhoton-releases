@@ -32,6 +32,7 @@ from tabs.centre_tab import CentreTab
 from tabs.cave_tab import CaveTab
 from tabs.radial_tab import RadialTab
 from tabs.azimuthal_tab import AzimuthalTab
+from tabs.unfold_tab import UnfoldTab
 from tabs.hermans_tab import HermansTab
 from tabs.datplot_tab import DatPlotTab
 
@@ -114,6 +115,7 @@ class MainWindow(QMainWindow):
         self.tab_bar.addTab("Cave")
         self.radial_tab_index = self.tab_bar.addTab("Radial")
         self.tab_bar.addTab("Azimuthal")
+        self.tab_bar.addTab("Unfold")
         self.tab_bar.addTab("Anisotropy")
 
         header_layout.addStretch()
@@ -146,8 +148,10 @@ class MainWindow(QMainWindow):
         self.cave_tab = CaveTab()
         self.radial_tab = RadialTab()
         self.azimuthal_tab = AzimuthalTab()
+        self.unfold_tab = UnfoldTab()
         self.hermans_tab = HermansTab()
         self.view_tab.set_q_geometry_source_tab(self.azimuthal_tab)
+        self.unfold_tab.set_q_geometry_source_tab(self.azimuthal_tab)
 
         self.pages.addWidget(self.view_tab)
         self.pages.addWidget(self.datplot_tab)
@@ -155,6 +159,7 @@ class MainWindow(QMainWindow):
         self.pages.addWidget(self.cave_tab)
         self.pages.addWidget(self.radial_tab)
         self.pages.addWidget(self.azimuthal_tab)
+        self.pages.addWidget(self.unfold_tab)
         self.pages.addWidget(self.hermans_tab)
 
         # Folder synchronisation between tabs using a folder browser.
@@ -164,6 +169,7 @@ class MainWindow(QMainWindow):
             self.datplot_tab,
             self.radial_tab,
             self.azimuthal_tab,
+            self.unfold_tab,
             self.hermans_tab,
         ]
 
