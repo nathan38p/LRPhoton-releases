@@ -10,7 +10,7 @@ LRPhoton is a Python application for SAXS/WAXS data processing and visualization
 3. Open the extracted folder.
 4. Double click on Install.bat.
 
-## The installer will:
+The installer will:
 
 * install Python automatically if it is missing
 * install all required Python dependencies
