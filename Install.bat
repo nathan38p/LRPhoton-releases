@@ -1,61 +1,61 @@
 @echo off
 title LRPhoton Installer
+setlocal
 
 echo ==========================================
 echo          INSTALLATION LRPhoton
 echo ==========================================
 echo.
 
+echo Installation de Python Install Manager...
+winget install -e --id Python.PythonInstallManager
+
+echo.
+
 :: =========================================================
-:: INSTALLATION PYTHON 3.14 x64 SI ABSENT
+:: PYTHON 3.14 x64 DEDIE A LRPhoton
 :: =========================================================
 
-echo Verification de Python 3.14 x64...
+set "PYTHON_DIR=%LOCALAPPDATA%\Programs\LRPhotonPython314x64"
+set "PYTHON_EXE=%PYTHON_DIR%\python.exe"
+set "PYTHON_INSTALLER=%TEMP%\python-3.14.5-amd64.exe"
 
-py -3.14-64 --version >nul 2>&1
+echo Verification de Python 3.14 x64 dedie a LRPhoton...
+
+if not exist "%PYTHON_EXE%" (
+    echo.
+    echo Python 3.14 x64 dedie non detecte.
+    echo Telechargement de Python 3.14 x64 depuis python.org...
+
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.14.5/python-3.14.5-amd64.exe' -OutFile '%PYTHON_INSTALLER%'"
+
+    echo.
+    echo Installation de Python 3.14 x64 dans :
+    echo %PYTHON_DIR%
+
+    "%PYTHON_INSTALLER%" /quiet InstallAllUsers=0 TargetDir="%PYTHON_DIR%" PrependPath=0 Include_launcher=0 Include_pip=1 Include_test=0
+)
+
+if not exist "%PYTHON_EXE%" (
+    echo.
+    echo ERREUR : Python x64 n'a pas ete installe correctement.
+    pause
+    exit /b 1
+)
+
+echo.
+echo Verification architecture Python...
+"%PYTHON_EXE%" -c "import platform, sys; print(platform.machine()); sys.exit(0 if platform.machine().lower() in ('amd64','x86_64') else 1)"
 
 if errorlevel 1 (
-
     echo.
-    echo Python 3.14 x64 non detecte.
-    echo Telechargement de Python 3.14 x64 depuis python.org...
-    echo.
-
-    set "PYTHON_INSTALLER=%TEMP%\python-3.14.5-amd64.exe"
-
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.14.5/python-3.14.5-amd64.exe' -OutFile '%PYTHON_INSTALLER%'"
-
-    echo.
-    echo Installation de Python 3.14 x64...
-    echo.
-
-    "%PYTHON_INSTALLER%" /quiet InstallAllUsers=0 PrependPath=1 Include_launcher=1 Include_pip=1
-
-    echo.
-    echo Verification installation...
-    echo.
-
-    py -3.14-64 --version >nul 2>&1
-
-    if errorlevel 1 (
-        echo.
-        echo ERREUR :
-        echo Python 3.14 x64 n'a pas ete detecte.
-        echo.
-        echo Redemarrez Windows puis relancez Install.bat
-        echo.
-        pause
-        exit
-    )
+    echo ERREUR : le Python detecte n'est pas x64/AMD64.
+    pause
+    exit /b 1
 )
 
 echo Python 3.14 x64 detecte.
 echo.
-
-:: =========================================================
-:: DOSSIER INSTALLATION
-:: =========================================================
 
 set "SOURCE=%~dp0"
 set "DEST=C:\Program Files\LRPhoton"
@@ -65,16 +65,14 @@ mkdir "%DEST%" >nul 2>&1
 
 echo.
 echo Copie des fichiers...
-
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-"Copy-Item -Path '%SOURCE%*' -Destination '%DEST%' -Recurse -Force"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Copy-Item -Path '%SOURCE%*' -Destination '%DEST%' -Recurse -Force"
 
 echo.
 echo Installation des dependances...
 
-py -3.14-64 -m pip install --upgrade pip
+"%PYTHON_EXE%" -m pip install --upgrade pip
 
-py -3.14-64 -m pip install ^
+"%PYTHON_EXE%" -m pip install ^
 PySide6 ^
 numpy ^
 matplotlib ^
@@ -83,22 +81,30 @@ fabio ^
 requests ^
 hdf5plugin
 
+if errorlevel 1 (
+    echo.
+    echo ERREUR : certaines dependances n'ont pas pu etre installees.
+    pause
+    exit /b 1
+)
+
 echo.
-echo Creation du raccourci bureau...
+echo Creation du lanceur bureau...
 
 (
 echo @echo off
 echo cd /d "C:\Program Files\LRPhoton"
-echo py -3.14-64 main.py
+echo "%PYTHON_EXE%" main.py
 ) > "%USERPROFILE%\Desktop\LRPhoton.bat"
 
 echo.
 echo Creation icone...
 
-powershell -Command ^
-"$WshShell = New-Object -comObject WScript.Shell; ^
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+"$WshShell = New-Object -ComObject WScript.Shell; ^
 $Shortcut = $WshShell.CreateShortcut('%USERPROFILE%\Desktop\LRPhoton.lnk'); ^
 $Shortcut.TargetPath = '%USERPROFILE%\Desktop\LRPhoton.bat'; ^
+$Shortcut.WorkingDirectory = 'C:\Program Files\LRPhoton'; ^
 $Shortcut.IconLocation = 'C:\Program Files\LRPhoton\assets\LRPhoton.ico'; ^
 $Shortcut.Save()"
 
@@ -109,6 +115,9 @@ echo ==========================================
 echo.
 echo Logiciel :
 echo C:\Program Files\LRPhoton
+echo.
+echo Python dedie :
+echo %PYTHON_EXE%
 echo.
 echo Raccourci cree sur le bureau :
 echo LRPhoton
