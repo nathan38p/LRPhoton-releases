@@ -11,7 +11,20 @@ if %errorlevel% neq 0 (
     echo Python non detecte.
     echo Installation automatique de Python...
 
-    winget install -e --id Python.Python
+    winget install -e --id Python.Python.3.14
+    if %errorlevel% neq 0 winget install -e --id Python.Python.3.13
+    if %errorlevel% neq 0 winget install -e --id Python.Python.3.12
+
+    where py >nul 2>nul
+    if %errorlevel% neq 0 (
+        echo.
+        echo ERREUR : Python n'a pas pu etre installe automatiquement.
+        echo Installez Python manuellement depuis :
+        echo https://www.python.org/downloads/
+        echo Puis relancez Install.bat.
+        pause
+        exit
+    )
 
     echo.
     echo Python installe.
