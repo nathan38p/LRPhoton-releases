@@ -206,7 +206,7 @@ class MainWindow(QMainWindow):
         header_layout.addWidget(self.tab_bar)
         header_layout.addStretch()
 
-        self.report_button = QPushButton("Report issue")
+        self.report_button = QPushButton("💬 Feedback")
         self.report_button.setFixedHeight(28)
         self.report_button.setCursor(Qt.PointingHandCursor)
         self.report_button.setStyleSheet("""
