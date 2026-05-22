@@ -6,18 +6,23 @@ import shutil
 import tempfile
 import zipfile
 import subprocess
+import base64
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 
 import requests
 
-from PySide6.QtCore import Qt, QTimer, QSize
+from PySide6.QtCore import Qt, QTimer, QSize, QByteArray, QBuffer, QIODevice
 
 from PySide6.QtWidgets import (
     QApplication,
     QLabel,
     QMessageBox,
     QFrame,
+    QDialog,
+    QTextEdit,
+    QPushButton,
     QHBoxLayout,
     QMainWindow,
     QStackedWidget,
@@ -41,6 +46,10 @@ from tabs.datplot_tab import DatPlotTab
 
 APP_NAME = "LRPhoton"
 APP_VERSION = "1.0.2"
+# Constants
+REPORT_EMAIL = "nathan.piaget@univ-grenoble-alpes.fr"
+REPORT_ENDPOINT_URL = "https://formsubmit.co/gupijo"
+REPORT_PAGE_URL = "https://nathan38p.github.io/LRPhoton-releases/report.html"
 # update test
 GITHUB_OWNER = "nathan38p"
 GITHUB_REPO = "LRPhoton-releases"
@@ -175,6 +184,25 @@ class MainWindow(QMainWindow):
         header_layout.addWidget(self.tab_bar)
         header_layout.addStretch()
 
+        self.report_button = QPushButton("Report issue")
+        self.report_button.setFixedHeight(28)
+        self.report_button.setCursor(Qt.PointingHandCursor)
+        self.report_button.setStyleSheet("""
+            QPushButton {
+                font-size: 11px;
+                color: #444444;
+                padding: 4px 10px;
+                border-radius: 8px;
+                border: 1px solid #dddddd;
+                background: #f8f8f8;
+            }
+            QPushButton:hover {
+                background: #eeeeee;
+            }
+        """)
+        self.report_button.clicked.connect(self.open_issue_report_dialog)
+        header_layout.addWidget(self.report_button)
+
         self.version_label = QLabel("Checking for updates…")
         self.version_label.setStyleSheet("""
             QLabel {
@@ -244,6 +272,100 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.pages)
 
         self.setCentralWidget(container)
+
+    def open_issue_report_dialog(self):
+        screenshot = self.grab()
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Report an issue")
+        dialog.resize(560, 520)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
+
+        info_label = QLabel(
+            "Describe the problem. LRPhoton will copy the screenshot to the clipboard and open the online report page."
+        )
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: #555555; font-size: 12px;")
+        layout.addWidget(info_label)
+
+        preview_label = QLabel()
+        preview_label.setAlignment(Qt.AlignCenter)
+        preview_label.setMinimumHeight(160)
+        preview_label.setStyleSheet("""
+            QLabel {
+                background: #f4f4f4;
+                border: 1px solid #dddddd;
+                border-radius: 8px;
+                padding: 6px;
+            }
+        """)
+        preview_label.setPixmap(
+            screenshot.scaled(
+                500,
+                190,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
+            )
+        )
+        layout.addWidget(preview_label)
+
+        text_edit = QTextEdit()
+        text_edit.setPlaceholderText(
+            "Example: I clicked on Radial, selected this EDF file, then the plot did not update..."
+        )
+        layout.addWidget(text_edit)
+
+        button_row = QHBoxLayout()
+        button_row.addStretch()
+
+        cancel_button = QPushButton("Cancel")
+        send_button = QPushButton("Open report page")
+        send_button.setDefault(True)
+
+        button_row.addWidget(cancel_button)
+        button_row.addWidget(send_button)
+        layout.addLayout(button_row)
+
+        cancel_button.clicked.connect(dialog.reject)
+
+        def open_online_report_page():
+            description = text_edit.toPlainText().strip()
+            if not description:
+                QMessageBox.warning(
+                    dialog,
+                    "Missing description",
+                    "Please write a short description of the problem before opening the report page."
+                )
+                return
+
+            active_tab = self.tab_bar.tabText(self.tab_bar.currentIndex())
+            report_payload = (
+                "LRPhoton issue report\n"
+                f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"Application version: {APP_VERSION}\n"
+                f"Python: {platform.python_version()}\n"
+                f"System: {platform.platform()}\n"
+                f"Active tab: {active_tab}\n\n"
+                "Description:\n"
+                f"{description}\n"
+            )
+
+            report_url = f"{REPORT_PAGE_URL}?message={quote(report_payload)}"
+            webbrowser.open(report_url)
+            QMessageBox.information(
+                dialog,
+                "Report page opened",
+                "The online report page has been opened.\n\n"
+                "The description field should be filled automatically.\n"
+                "The screenshot still has to be added with the file field on the page."
+            )
+            dialog.accept()
+
+        send_button.clicked.connect(open_online_report_page)
+        dialog.exec()
 
 
 
