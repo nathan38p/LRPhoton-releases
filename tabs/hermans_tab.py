@@ -1264,24 +1264,38 @@ class HermansTab(QWidget):
         self.graph_box.setTitle("I(q) profiles" if anisotropy_mode else "Azimuthal profile")
         self.image_box.setVisible(anisotropy_mode)
 
-        hermans_widgets = [
-            self.offset_slider.label_widget,
-            self.peak_slider.label_widget,
-            self.window_slider.label_widget,
-            self.height_slider.label_widget,
-            self.manual_fwhm_slider.label_widget,
-            self.offset_spin, self.offset_slider, self.offset_slider.min_spin, self.offset_slider.max_spin,
-            self.peak_spin, self.peak_slider, self.peak_slider.min_spin, self.peak_slider.max_spin,
-            self.window_spin, self.window_slider, self.window_slider.min_spin, self.window_slider.max_spin,
-            self.use_fit_checkbox, self.height_spin, self.height_slider,
-            self.height_slider.min_spin, self.height_slider.max_spin,
-            self.manual_fwhm_spin, self.manual_fwhm_slider,
-            self.manual_fwhm_slider.min_spin, self.manual_fwhm_slider.max_spin,
-            self.fit_button, self.save_fit_button,
-        ]
+        hermans_widgets = []
+        for slider in [
+            getattr(self, "offset_slider", None),
+            getattr(self, "peak_slider", None),
+            getattr(self, "window_slider", None),
+            getattr(self, "height_slider", None),
+            getattr(self, "manual_fwhm_slider", None),
+        ]:
+            if slider is None:
+                continue
+            hermans_widgets.append(slider)
+            for attribute_name in ["label_widget", "min_spin", "max_spin"]:
+                widget = getattr(slider, attribute_name, None)
+                if widget is not None:
+                    hermans_widgets.append(widget)
+
+        for widget in [
+            getattr(self, "offset_spin", None),
+            getattr(self, "peak_spin", None),
+            getattr(self, "window_spin", None),
+            getattr(self, "use_fit_checkbox", None),
+            getattr(self, "height_spin", None),
+            getattr(self, "manual_fwhm_spin", None),
+            getattr(self, "fit_button", None),
+            getattr(self, "save_fit_button", None),
+        ]:
+            if widget is not None:
+                hermans_widgets.append(widget)
 
         for widget in hermans_widgets:
-            widget.setVisible(not anisotropy_mode)
+            if widget is not None:
+                widget.setVisible(not anisotropy_mode)
 
         for widget in self.anisotropy_param_widgets:
             widget.setVisible(anisotropy_mode)
