@@ -282,7 +282,53 @@ ID02_DEFAULT_PIXEL_MM = 0.075
 ID02_DEFAULT_WAVELENGTH_A = 1.01402
 CENTER_X_KEYS = ("Center_1", "center_1", "CenterX", "center_x", "BeamCenterX", "Beam_x", "beam_x")
 CENTER_Y_KEYS = ("Center_2", "center_2", "CenterY", "center_y", "BeamCenterY", "Beam_y", "beam_y")
-ID13_CONFIG_PATH = Path(__file__).resolve().parent.parent / "id13" / "config_udetx_m800.json"
+ID13_PYFAI_CONFIG = {
+    "application": "pyfai-integrate",
+    "version": 5,
+    "poni": {
+        "poni_version": 2.1,
+        "dist": 0.2635206714029405,
+        "poni1": 0.0982514482559307,
+        "poni2": 0.09702116862200875,
+        "rot1": 0.0,
+        "rot2": 0.0,
+        "rot3": 0.0,
+        "detector": "Eiger4M",
+        "detector_config": {
+            "orientation": 3,
+        },
+        "wavelength": 8.265613228880018e-11,
+    },
+    "nbpt_rad": 1400,
+    "nbpt_azim": 360,
+    "unit": "q_nm^-1",
+    "chi_discontinuity_at_0": False,
+    "polarization_description": [
+        0.99,
+        0.0,
+    ],
+    "normalization_factor": 1.0,
+    "val_dummy": None,
+    "delta_dummy": None,
+    "correct_solid_angle": True,
+    "dark_current": None,
+    "flat_field": None,
+    "mask_file": "fabio:///gpfs/gb/data/visitor/sc5729/id13/20251202/PROCESSED_DATA/mask_udetx_m800_.edf",
+    "error_model": "no",
+    "method": [
+        "bbox",
+        "csr",
+        "opencl",
+    ],
+    "opencl_device": "gpu",
+    "azimuth_range": None,
+    "radial_range": None,
+    "integrator_class": "AzimuthalIntegrator",
+    "integrator_method": None,
+    "extra_options": None,
+    "monitor_name": None,
+    "shape": None,
+}
 
 
 # ============================================================
@@ -375,7 +421,7 @@ def q_geometry_diagnostics(image, xc, yc, distance_m, pixel_x_mm, pixel_y_mm, wa
 
 
 def load_id13_pyfai_config():
-    """Load the ID13 pyFAI JSON saved next to the example workflow."""
+    """Return the embedded ID13 pyFAI configuration without reading an external file."""
     fallback = {
         "poni": {
             "dist": ID13_DEFAULT_DISTANCE_M,
@@ -391,17 +437,10 @@ def load_id13_pyfai_config():
         "polarization_description": [0.99, 0.0],
         "correct_solid_angle": True,
         "radial_range": None,
+        "azimuth_range": None,
     }
 
-    if not ID13_CONFIG_PATH.exists():
-        return fallback
-
-    try:
-        with open(ID13_CONFIG_PATH, "r", encoding="utf-8") as file:
-            config = json.load(file)
-    except Exception:
-        return fallback
-
+    config = dict(ID13_PYFAI_CONFIG)
     merged = dict(fallback)
     merged.update(config)
     merged["poni"] = {**fallback["poni"], **config.get("poni", {})}
@@ -532,60 +571,10 @@ def id13_pyfai_exact_average(image, q_min, q_max, sector_min, sector_max, config
     except Exception:
         return None
 
-    if not ID13_CONFIG_PATH.exists():
-        return None
-
-    try:
-        integrator = pyFAI.load(str(ID13_CONFIG_PATH))
-        radial_range = config.get("radial_range")
-        if radial_range and len(radial_range) == 2:
-            radial_range = tuple(map(float, radial_range))
-        elif q_min > 0 or q_max > 0:
-            radial_range = (
-                float(q_min) if q_min > 0 else None,
-                float(q_max) if q_max > 0 else None,
-            )
-            if radial_range[0] is None or radial_range[1] is None:
-                radial_range = None
-        else:
-            radial_range = None
-
-        azimuth_range = config.get("azimuth_range")
-        if azimuth_range is None and abs((sector_max - sector_min) % 360.0) >= 1e-9:
-            azimuth_range = (float(sector_min), float(sector_max))
-
-        polarization = config.get("polarization_description")
-        polarization_factor = float(polarization[0]) if polarization else None
-        method = config.get("method")
-        if isinstance(method, list):
-            method = tuple(method)
-
-        result = integrator.integrate1d(
-            image,
-            int(config.get("nbpt_rad", 1400)),
-            unit=config.get("unit", "q_nm^-1"),
-            radial_range=radial_range,
-            azimuth_range=azimuth_range,
-            correctSolidAngle=bool(config.get("correct_solid_angle", False)),
-            polarization_factor=polarization_factor,
-            dummy=config.get("val_dummy"),
-            delta_dummy=config.get("delta_dummy"),
-            method=method,
-        )
-
-        if hasattr(result, "radial") and hasattr(result, "intensity"):
-            q_axis = np.asarray(result.radial, dtype=np.float64)
-            intensity = np.asarray(result.intensity, dtype=np.float64)
-        else:
-            q_axis = np.asarray(result[0], dtype=np.float64)
-            intensity = np.asarray(result[1], dtype=np.float64)
-        valid = np.isfinite(q_axis) & np.isfinite(intensity) & (intensity > 0)
-        counts = np.ones(int(np.count_nonzero(valid)), dtype=int)
-        config = dict(config)
-        config["used_pyfai"] = True
-        return q_axis[valid], intensity[valid], counts, config
-    except Exception:
-        return None
+    # No external ID13 config file is used here; the embedded config is already
+    # available through load_id13_pyfai_config(). If pyFAI is installed, this
+    # function could be extended to build an integrator from the embedded config.
+    return None
 
 
 # ============================================================
@@ -2145,7 +2134,7 @@ class RadialTab(QWidget):
                         )
                         comparison_source = "pyFAI integrate1d" if id13_config.get("used_pyfai") else "local pyFAI-compatible"
                         comparison_message = (
-                            f"  ID13 pyFAI comparison = {q_id13.size} bins from {ID13_CONFIG_PATH.name}"
+                            f"  ID13 pyFAI comparison = {q_id13.size} bins from embedded config"
                             f" ; q range = {np.nanmin(q_id13):.10g} -> {np.nanmax(q_id13):.10g} nm⁻¹"
                             f" ; {comparison_source} ; solid angle/polarization corrected"
                         )

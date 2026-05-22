@@ -624,6 +624,8 @@ class ViewTab(QWidget):
         ]:
             button.setCheckable(True)
 
+        self.q_xenocs_button.setChecked(True)
+
         for button in [
             self.q_xenocs_button,
             self.q_id02_button,
@@ -634,6 +636,7 @@ class ViewTab(QWidget):
             q_buttons_layout.addWidget(button)
 
         self.update_q_geometry_button_styles()
+        self.set_q_geometry_mode("XENOCS")
         info_box_layout.addLayout(q_buttons_layout)
         info_box_layout.addWidget(self.info_text)
         right_layout.addWidget(info_box)
