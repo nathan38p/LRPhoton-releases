@@ -708,7 +708,7 @@ def main():
         QTimer.singleShot(1200, lambda: window.check_for_updates(silent=window.silent_update_test))
     else:
         window.version_label.setText("DEV")
-        window.update_button.setVisible(False)
+        window.version_label.setEnabled(False)
 
     sys.exit(app.exec())
 
