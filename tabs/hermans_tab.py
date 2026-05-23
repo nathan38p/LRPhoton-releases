@@ -41,6 +41,7 @@ from .instrument_presets import (
     ID13_DEFAULT_PIXEL_MM,
     ID13_DEFAULT_WAVELENGTH_A,
 )
+from .file_ratings import file_path_from_item, install_file_rating_menu, set_item_file_path
 from .ui_style import (
     BLOCK_SPACING,
     FILE_BROWSER_WIDTH,
@@ -848,6 +849,7 @@ class HermansTab(QWidget):
         file_browser_layout.addWidget(self.refresh_button)
 
         self.file_list = QListWidget()
+        install_file_rating_menu(self.file_list)
         self.file_list.currentItemChanged.connect(self.load_selected_file)
         self.file_list.setMinimumHeight(180)
 
@@ -1455,11 +1457,15 @@ class HermansTab(QWidget):
             for file in files
         ]
 
-        current_text = self.file_list.currentItem().text() if self.file_list.currentItem() else None
+        current_item = self.file_list.currentItem()
+        current_text = current_item.text() if current_item else None
 
         self.file_list.blockSignals(True)
         self.file_list.clear()
-        self.file_list.addItems(self.available_files)
+        for display_name, file in zip(self.available_files, files):
+            self.file_list.addItem(display_name)
+            item = self.file_list.item(self.file_list.count() - 1)
+            set_item_file_path(item, file)
         self.file_list.blockSignals(False)
 
         if self.available_files:
@@ -1822,7 +1828,7 @@ class HermansTab(QWidget):
                 clear_plot_canvas(self.canvas)
             return
 
-        self.load_file(self.folder / item.text())
+        self.load_file(file_path_from_item(item, self.folder))
 
     def load_file(self, file_path):
         self.current_file = Path(file_path)

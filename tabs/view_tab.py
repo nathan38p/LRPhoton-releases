@@ -47,6 +47,7 @@ from .instrument_presets import (
     ID13_DEFAULT_PIXEL_MM,
     ID13_DEFAULT_WAVELENGTH_A,
 )
+from .file_ratings import install_file_rating_menu, set_item_file_path
 from .ui_style import (
     BLOCK_SPACING,
     FILE_BROWSER_WIDTH,
@@ -290,6 +291,7 @@ class ViewTab(QWidget):
         file_layout.addWidget(refresh_button)
 
         self.file_list = QListWidget()
+        install_file_rating_menu(self.file_list)
         self.file_list.currentItemChanged.connect(self.file_selection_changed)
         self.file_list.itemClicked.connect(self.open_selected_file)
         self.file_list.itemDoubleClicked.connect(self.open_selected_file)
@@ -816,9 +818,7 @@ class ViewTab(QWidget):
             item_text = str(path.relative_to(folder))
             self.file_list.addItem(item_text)
             item = self.file_list.item(self.file_list.count() - 1)
-            resolved_path = path.expanduser().resolve()
-            item.setData(Qt.UserRole, str(resolved_path))
-            item.setToolTip(str(resolved_path))
+            set_item_file_path(item, path)
 
     def file_selection_changed(self, current, previous):
         if current is None:
@@ -1231,7 +1231,13 @@ class ViewTab(QWidget):
         end = self.frame_end_spin.value() - 1
 
         if start > end:
-            return
+            sender = self.sender()
+            if sender is self.frame_start_spin:
+                self.frame_end_spin.setValue(self.frame_start_spin.value())
+                end = start
+            else:
+                self.frame_start_spin.setValue(self.frame_end_spin.value())
+                start = end
 
         self.frame_slider.setMinimum(start)
         self.frame_slider.setMaximum(end)

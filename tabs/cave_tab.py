@@ -441,6 +441,11 @@ class ImageCanvas(FigureCanvas):
         self.coordinate_label = label
         self.image_name = image_name
 
+    def coordinate_text(self, text):
+        if self.image_name:
+            return f"{self.image_name} | {text}"
+        return text
+
     def set_q_calculator(self, calculator):
         self.q_calculator = calculator
 
@@ -616,7 +621,7 @@ class ImageCanvas(FigureCanvas):
             return
 
         if event.inaxes != self.ax or event.xdata is None or event.ydata is None:
-            self.coordinate_label.setText(f"{self.image_name} | x = - | y = - | I = -")
+            self.coordinate_label.setText(self.coordinate_text("x = - | y = - | I = -"))
             return
 
         x = int(round(event.xdata + 1))
@@ -638,7 +643,7 @@ class ImageCanvas(FigureCanvas):
                     if q_value is not None:
                         q_text = f"q = {q_value:.6g} nm⁻¹"
 
-        self.coordinate_label.setText(f"{self.image_name} | x = {x} | y = {y} | {intensity_text} | {q_text}")
+        self.coordinate_label.setText(self.coordinate_text(f"x = {x} | y = {y} | {intensity_text} | {q_text}"))
 
     def show_image(self, image, xc=None, yc=None, title="", vmin=None, vmax=None, white_mask=None):
         previous_xlim = self.ax.get_xlim() if self.image_artist is not None else None
@@ -1157,6 +1162,10 @@ class CaveTab(QWidget):
             else:
                 self.frame_start_spin.setValue(end)
                 start = end
+
+        self.frame_slider.blockSignals(True)
+        self.frame_slider.setRange(start, end)
+        self.frame_slider.blockSignals(False)
 
         current = self.frame_spin.value()
         if current < start:

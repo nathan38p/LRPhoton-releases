@@ -38,6 +38,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 
+from .file_ratings import install_file_rating_menu, set_item_file_path
 from .ui_style import (
     BLOCK_SPACING,
     FILE_BROWSER_WIDTH,
@@ -439,6 +440,7 @@ class DatPlotTab(QWidget):
         file_layout.addWidget(self.refresh_button)
 
         self.file_list = QListWidget()
+        install_file_rating_menu(self.file_list)
         self.file_list.setSelectionMode(QListWidget.ExtendedSelection)
         self.file_list.itemSelectionChanged.connect(self.selection_changed)
         file_layout.addWidget(self.file_list, stretch=1)
@@ -668,9 +670,7 @@ class DatPlotTab(QWidget):
             display_name = str(file.relative_to(folder)) if self.show_subfolders.isChecked() else file.name
             self.file_list.addItem(display_name)
             item = self.file_list.item(self.file_list.count() - 1)
-            resolved_path = file.expanduser().resolve()
-            item.setData(Qt.UserRole, str(resolved_path))
-            item.setToolTip(str(resolved_path))
+            set_item_file_path(item, file)
         self.file_list.blockSignals(False)
 
     def selection_changed(self):

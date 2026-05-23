@@ -391,8 +391,22 @@ class AverageTab(QWidget):
             sender = self.sender()
             if sender is self.frame_start_spin:
                 self.frame_end_spin.setValue(start)
+                end = start
             else:
                 self.frame_start_spin.setValue(end)
+                start = end
+
+        self.frame_slider.blockSignals(True)
+        self.frame_slider.setRange(start, end)
+        self.frame_slider.blockSignals(False)
+
+        current = self.current_frame_index + 1
+        if current < start:
+            self.set_current_frame_index(start - 1)
+            return
+        if current > end:
+            self.set_current_frame_index(end - 1)
+            return
 
         self.update_frame_counter()
         self.invalidate_average()
@@ -406,16 +420,16 @@ class AverageTab(QWidget):
             self.frame_start_spin.setEnabled(can_navigate)
             self.frame_end_spin.setEnabled(can_navigate)
             self.frame_slider.setEnabled(can_navigate)
-            self.prev_frame_button.setEnabled(can_navigate and current > 1)
-            self.next_frame_button.setEnabled(can_navigate and current < total)
+            self.prev_frame_button.setEnabled(can_navigate and current > self.frame_slider.minimum())
+            self.next_frame_button.setEnabled(can_navigate and current < self.frame_slider.maximum())
 
     def previous_frame(self):
-        if self.current_frame_index <= 0:
+        if self.current_frame_index + 1 <= self.frame_slider.minimum():
             return
         self.set_current_frame_index(self.current_frame_index - 1)
 
     def next_frame(self):
-        if self.current_frame_index >= len(self.frames) - 1:
+        if self.current_frame_index + 1 >= self.frame_slider.maximum():
             return
         self.set_current_frame_index(self.current_frame_index + 1)
 

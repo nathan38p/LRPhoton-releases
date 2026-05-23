@@ -41,6 +41,7 @@ from .instrument_presets import (
     ID13_DEFAULT_PIXEL_MM,
     ID13_DEFAULT_WAVELENGTH_A,
 )
+from .file_ratings import file_path_from_item, install_file_rating_menu, set_item_file_path
 from .ui_style import (
     BLOCK_SPACING,
     FILE_BROWSER_WIDTH,
@@ -662,6 +663,7 @@ class AzimuthalTab(QWidget):
         file_layout.addWidget(self.refresh_button)
 
         self.file_list = QListWidget()
+        install_file_rating_menu(self.file_list)
         self.file_list.setSelectionMode(QListWidget.ExtendedSelection)
         self.file_list.itemSelectionChanged.connect(self.selection_changed)
         self.file_list.setMinimumHeight(180)
@@ -1029,6 +1031,8 @@ class AzimuthalTab(QWidget):
         for file in files:
             display_name = str(file.relative_to(folder)) if getattr(self, "show_subfolders_checkbox", None) and self.show_subfolders_checkbox.isChecked() else file.name
             self.file_list.addItem(display_name)
+            item = self.file_list.item(self.file_list.count() - 1)
+            set_item_file_path(item, file)
 
         selected = self.selected_files()
         self.set_controls_enabled(bool(selected))
@@ -1056,7 +1060,7 @@ class AzimuthalTab(QWidget):
             clear_plot_canvas(self.image_canvas)
 
     def selected_files(self):
-        return [self.current_folder / item.text() for item in self.file_list.selectedItems()]
+        return [file_path_from_item(item, self.current_folder) for item in self.file_list.selectedItems()]
 
     def update_frame_controls_from_file(self, file_path):
         self.total_frames = 1
