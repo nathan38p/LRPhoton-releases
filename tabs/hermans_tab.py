@@ -1384,11 +1384,14 @@ class HermansTab(QWidget):
 
         if self.folder is not None:
             self.refresh_files()
-        elif anisotropy_mode:
-            self.calculate_anisotropy()
-        else:
-            self.calculate()
-        self.update_frame_navigation_state()
+        elif hasattr(self, "canvas"):
+            if anisotropy_mode:
+                self.calculate_anisotropy()
+            else:
+                self.calculate()
+
+        if hasattr(self, "frame_slider"):
+            self.update_frame_navigation_state()
 
     def update_file_filter_for_parameter(self):
         if not hasattr(self, "extensions_filter"):
@@ -1815,7 +1818,8 @@ class HermansTab(QWidget):
             self.results_text.clear()
             self.clear_graph_coordinates()
             self.update_plot_toolbar_enabled(False)
-            clear_plot_canvas(self.canvas)
+            if hasattr(self, "canvas"):
+                clear_plot_canvas(self.canvas)
             return
 
         self.load_file(self.folder / item.text())
