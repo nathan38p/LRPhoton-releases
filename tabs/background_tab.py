@@ -1,5 +1,3 @@
-
-
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget,
@@ -14,7 +12,33 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QSpinBox,
     QTextEdit,
+    QSlider,
+    QScrollArea,
+    QSizePolicy,
 )
+
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+
+import os
+import numpy as np
+
+try:
+    import fabio
+    from fabio.edfimage import EdfImage
+except Exception:
+    fabio = None
+    EdfImage = None
+
+try:
+    import h5py
+except Exception:
+    h5py = None
+
+try:
+    import hdf5plugin  # noqa: F401
+except Exception:
+    pass
 
 try:
     from tabs.ui_style import (
@@ -30,14 +54,50 @@ except Exception:
     TOOL_GROUP_BOX_STYLE = ""
 
 
+class LazyImageStack:
+    def __init__(self, file_path, kind, data=None, dataset_path=None, frame_count=1, shape=None):
+        self.file_path = file_path
+        self.kind = kind
+        self.data = data
+        self.dataset_path = dataset_path
+        self.frame_count = int(frame_count)
+        self.shape = shape
+
+    def get_frame(self, frame_index):
+        frame_index = max(0, min(int(frame_index), self.frame_count - 1))
+
+        if self.kind in ("edf", "text"):
+            if self.data.ndim == 2:
+                return self.data.astype(np.float64)
+            return self.data[frame_index].astype(np.float64)
+
+        if self.kind == "hdf5":
+            if h5py is None:
+                raise ImportError("h5py is required to read HDF5 files.")
+            with h5py.File(self.file_path, "r") as handle:
+                dataset = handle[self.dataset_path]
+                if dataset.ndim == 2:
+                    return np.asarray(dataset[:, :], dtype=np.float64)
+                return np.asarray(dataset[frame_index, :, :], dtype=np.float64)
+
+        return None
+
+
 class BackgroundTab(QWidget):
     folder_changed = Signal(str)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.sample_file_path = ""
         self.background_file_path = ""
         self.output_folder_path = ""
         self.current_folder = ""
+        self.sample_stack = None
+        self.background_stack = None
+        self.result_data = None
+        self.contrast_vmin = None
+        self.contrast_vmax = None
+        self.contrast_auto_initialized = False
         self.build_ui()
 
     def build_ui(self):
@@ -45,51 +105,24 @@ class BackgroundTab(QWidget):
         main_layout.setContentsMargins(*PAGE_MARGINS)
         main_layout.setSpacing(BLOCK_SPACING)
 
-        top_layout = QHBoxLayout()
-        top_layout.setContentsMargins(*PANEL_MARGINS)
-        top_layout.setSpacing(BLOCK_SPACING)
+        content_layout = QHBoxLayout()
+        content_layout.setContentsMargins(*PANEL_MARGINS)
+        content_layout.setSpacing(BLOCK_SPACING)
 
-        files_box = QGroupBox("Files")
-        files_box.setStyleSheet(TOOL_GROUP_BOX_STYLE)
-        files_layout = QVBoxLayout(files_box)
-        files_layout.setContentsMargins(8, 20, 8, 8)
-        files_layout.setSpacing(6)
+        original_box = QGroupBox("Original")
+        original_box.setStyleSheet(TOOL_GROUP_BOX_STYLE)
+        original_layout = QVBoxLayout(original_box)
+        original_layout.setContentsMargins(8, 20, 8, 8)
+        original_layout.setSpacing(6)
 
-        self.sample_file_edit = QLineEdit()
-        self.sample_file_edit.setPlaceholderText("Sample file")
-        self.sample_file_edit.setReadOnly(True)
-        self.sample_file_button = QPushButton("Open sample")
-        self.sample_file_button.clicked.connect(self.select_sample_file)
-
-        sample_row = QHBoxLayout()
-        sample_row.addWidget(QLabel("Sample"))
-        sample_row.addWidget(self.sample_file_edit, 1)
-        sample_row.addWidget(self.sample_file_button)
-        files_layout.addLayout(sample_row)
-
-        self.background_file_edit = QLineEdit()
-        self.background_file_edit.setPlaceholderText("Background file")
-        self.background_file_edit.setReadOnly(True)
-        self.background_file_button = QPushButton("Open background")
-        self.background_file_button.clicked.connect(self.select_background_file)
-
-        background_row = QHBoxLayout()
-        background_row.addWidget(QLabel("Background"))
-        background_row.addWidget(self.background_file_edit, 1)
-        background_row.addWidget(self.background_file_button)
-        files_layout.addLayout(background_row)
-
-        self.output_folder_edit = QLineEdit()
-        self.output_folder_edit.setPlaceholderText("Output folder")
-        self.output_folder_edit.setReadOnly(True)
-        self.output_folder_button = QPushButton("Output folder")
-        self.output_folder_button.clicked.connect(self.select_output_folder)
-
-        output_row = QHBoxLayout()
-        output_row.addWidget(QLabel("Output"))
-        output_row.addWidget(self.output_folder_edit, 1)
-        output_row.addWidget(self.output_folder_button)
-        files_layout.addLayout(output_row)
+        self.original_canvas = FigureCanvas(Figure(figsize=(4, 3)))
+        self.original_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.original_canvas.setMinimumHeight(220)
+        self.original_ax = self.original_canvas.figure.add_subplot(111)
+        self.original_ax.set_title("Original file")
+        self.original_ax.set_xticks([])
+        self.original_ax.set_yticks([])
+        original_layout.addWidget(self.original_canvas, 1)
 
         parameters_box = QGroupBox("Parameters")
         parameters_box.setStyleSheet(TOOL_GROUP_BOX_STYLE)
@@ -97,80 +130,417 @@ class BackgroundTab(QWidget):
         parameters_layout.setContentsMargins(8, 20, 8, 8)
         parameters_layout.setSpacing(6)
 
-        scale_row = QHBoxLayout()
+        self.sample_file_edit = QLineEdit()
+        self.sample_file_edit.setPlaceholderText("Sample file")
+        self.sample_file_edit.setReadOnly(True)
+        self.sample_file_button = QPushButton("Open sample")
+        self.sample_file_button.clicked.connect(self.select_sample_file)
+        parameters_layout.addWidget(QLabel("Sample"))
+        parameters_layout.addWidget(self.sample_file_edit)
+        parameters_layout.addWidget(self.sample_file_button)
+
+        self.background_file_edit = QLineEdit()
+        self.background_file_edit.setPlaceholderText("Background file")
+        self.background_file_edit.setReadOnly(True)
+        self.background_file_button = QPushButton("Open background")
+        self.background_file_button.clicked.connect(self.select_background_file)
+        parameters_layout.addWidget(QLabel("Background"))
+        parameters_layout.addWidget(self.background_file_edit)
+        parameters_layout.addWidget(self.background_file_button)
+
+        self.output_folder_edit = QLineEdit()
+        self.output_folder_edit.setPlaceholderText("Output folder")
+        self.output_folder_edit.setReadOnly(True)
+        self.output_folder_button = QPushButton("Output folder")
+        self.output_folder_button.clicked.connect(self.select_output_folder)
+        parameters_layout.addWidget(QLabel("Output"))
+        parameters_layout.addWidget(self.output_folder_edit)
+        parameters_layout.addWidget(self.output_folder_button)
+
         self.background_scale_spin = QDoubleSpinBox()
         self.background_scale_spin.setDecimals(4)
         self.background_scale_spin.setRange(-999999.0, 999999.0)
         self.background_scale_spin.setSingleStep(0.01)
         self.background_scale_spin.setValue(1.0)
-        scale_row.addWidget(QLabel("Background factor"))
-        scale_row.addWidget(self.background_scale_spin)
-        parameters_layout.addLayout(scale_row)
+        self.background_scale_spin.valueChanged.connect(self.update_result_preview)
+        parameters_layout.addWidget(QLabel("Background factor"))
+        parameters_layout.addWidget(self.background_scale_spin)
 
-        offset_row = QHBoxLayout()
         self.offset_spin = QDoubleSpinBox()
         self.offset_spin.setDecimals(4)
         self.offset_spin.setRange(-999999.0, 999999.0)
         self.offset_spin.setSingleStep(0.01)
         self.offset_spin.setValue(0.0)
-        offset_row.addWidget(QLabel("Offset"))
-        offset_row.addWidget(self.offset_spin)
-        parameters_layout.addLayout(offset_row)
+        self.offset_spin.valueChanged.connect(self.update_result_preview)
+        parameters_layout.addWidget(QLabel("Offset"))
+        parameters_layout.addWidget(self.offset_spin)
 
-        frame_row = QHBoxLayout()
         self.frame_spin = QSpinBox()
-        self.frame_spin.setRange(0, 999999)
+        self.frame_spin.setRange(0, 0)
         self.frame_spin.setValue(0)
-        frame_row.addWidget(QLabel("Frame"))
-        frame_row.addWidget(self.frame_spin)
-        parameters_layout.addLayout(frame_row)
+        self.frame_spin.valueChanged.connect(self.sync_frame_slider_from_spin)
+        parameters_layout.addWidget(QLabel("Frame"))
+        parameters_layout.addWidget(self.frame_spin)
 
         self.keep_negative_checkbox = QCheckBox("Keep negative values")
         self.keep_negative_checkbox.setChecked(True)
+        self.keep_negative_checkbox.stateChanged.connect(self.update_result_preview)
         parameters_layout.addWidget(self.keep_negative_checkbox)
+
+        contrast_box = QGroupBox("Contrast")
+        contrast_box.setStyleSheet(TOOL_GROUP_BOX_STYLE)
+        contrast_layout = QVBoxLayout(contrast_box)
+        contrast_layout.setContentsMargins(8, 20, 8, 8)
+        contrast_layout.setSpacing(6)
+
+        min_row = QHBoxLayout()
+        min_row.addWidget(QLabel("Min"))
+        self.intensity_min_spin = QDoubleSpinBox()
+        self.intensity_min_spin.setDecimals(2)
+        self.intensity_min_spin.setRange(-1e12, 1e12)
+        self.intensity_min_spin.setSingleStep(100.0)
+        self.intensity_min_spin.valueChanged.connect(self.update_contrast_from_spins)
+        min_row.addWidget(self.intensity_min_spin)
+        contrast_layout.addLayout(min_row)
+
+        self.intensity_min_slider = QSlider(Qt.Horizontal)
+        self.intensity_min_slider.setRange(0, 1000)
+        self.intensity_min_slider.setValue(0)
+        self.intensity_min_slider.valueChanged.connect(self.update_contrast_from_sliders)
+        contrast_layout.addWidget(self.intensity_min_slider)
+
+        max_row = QHBoxLayout()
+        max_row.addWidget(QLabel("Max"))
+        self.intensity_max_spin = QDoubleSpinBox()
+        self.intensity_max_spin.setDecimals(2)
+        self.intensity_max_spin.setRange(-1e12, 1e12)
+        self.intensity_max_spin.setSingleStep(100.0)
+        self.intensity_max_spin.valueChanged.connect(self.update_contrast_from_spins)
+        max_row.addWidget(self.intensity_max_spin)
+        contrast_layout.addLayout(max_row)
+
+        self.intensity_max_slider = QSlider(Qt.Horizontal)
+        self.intensity_max_slider.setRange(0, 1000)
+        self.intensity_max_slider.setValue(1000)
+        self.intensity_max_slider.valueChanged.connect(self.update_contrast_from_sliders)
+        contrast_layout.addWidget(self.intensity_max_slider)
+
+        self.auto_contrast_button = QPushButton("Auto contrast")
+        self.auto_contrast_button.clicked.connect(self.auto_contrast)
+        contrast_layout.addWidget(self.auto_contrast_button)
+        parameters_layout.addWidget(contrast_box)
 
         self.save_preview_checkbox = QCheckBox("Save preview image")
         self.save_preview_checkbox.setChecked(False)
         parameters_layout.addWidget(self.save_preview_checkbox)
 
-        actions_box = QGroupBox("Actions")
-        actions_box.setStyleSheet(TOOL_GROUP_BOX_STYLE)
-        actions_layout = QVBoxLayout(actions_box)
-        actions_layout.setContentsMargins(8, 20, 8, 8)
-        actions_layout.setSpacing(6)
+        self.save_current_button = QPushButton("Save current frame")
+        self.save_current_button.clicked.connect(self.save_current_frame)
+        parameters_layout.addWidget(self.save_current_button)
 
-        self.run_button = QPushButton("Subtract background")
+        self.run_button = QPushButton("Save all frames")
         self.run_button.clicked.connect(self.run_background_subtraction)
-        actions_layout.addWidget(self.run_button)
+        parameters_layout.addWidget(self.run_button)
 
         self.status_label = QLabel("Ready")
         self.status_label.setWordWrap(True)
-        actions_layout.addWidget(self.status_label)
+        parameters_layout.addWidget(self.status_label)
 
-        left_column = QVBoxLayout()
-        left_column.setContentsMargins(*PANEL_MARGINS)
-        left_column.setSpacing(BLOCK_SPACING)
-        left_column.addWidget(files_box)
-        left_column.addWidget(parameters_box)
-        left_column.addWidget(actions_box)
-        left_column.addStretch(1)
-
-        log_box = QGroupBox("Log")
-        log_box.setStyleSheet(TOOL_GROUP_BOX_STYLE)
-        log_layout = QVBoxLayout(log_box)
-        log_layout.setContentsMargins(8, 20, 8, 8)
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
+        self.log_text.setMaximumHeight(120)
         self.log_text.setPlaceholderText("Background processing messages will appear here.")
-        log_layout.addWidget(self.log_text)
+        parameters_layout.addWidget(self.log_text)
+        parameters_layout.addStretch(1)
 
-        top_layout.addLayout(left_column, 1)
-        top_layout.addWidget(log_box, 2)
-        main_layout.addLayout(top_layout, 1)
+        result_box = QGroupBox("Background subtraction")
+        result_box.setStyleSheet(TOOL_GROUP_BOX_STYLE)
+        result_layout = QVBoxLayout(result_box)
+        result_layout.setContentsMargins(8, 20, 8, 8)
+        result_layout.setSpacing(6)
+
+        self.result_canvas = FigureCanvas(Figure(figsize=(4, 3)))
+        self.result_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.result_canvas.setMinimumHeight(220)
+        self.result_ax = self.result_canvas.figure.add_subplot(111)
+        self.result_ax.set_title("Result")
+        self.result_ax.set_xticks([])
+        self.result_ax.set_yticks([])
+        result_layout.addWidget(self.result_canvas, 1)
+
+        content_layout.addWidget(original_box, 2)
+
+        parameters_scroll = QScrollArea()
+        parameters_scroll.setWidgetResizable(True)
+        parameters_scroll.setFrameShape(QScrollArea.NoFrame)
+        parameters_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        parameters_scroll.setWidget(parameters_box)
+        parameters_scroll.setMinimumWidth(260)
+        parameters_scroll.setMaximumWidth(330)
+        content_layout.addWidget(parameters_scroll, 1)
+
+        content_layout.addWidget(result_box, 2)
+        main_layout.addLayout(content_layout, 1)
+
+        frame_slider_box = QGroupBox("Frame navigation")
+        frame_slider_box.setStyleSheet(TOOL_GROUP_BOX_STYLE)
+        frame_slider_box.setMaximumHeight(78)
+        frame_slider_layout = QHBoxLayout(frame_slider_box)
+        frame_slider_layout.setContentsMargins(8, 20, 8, 8)
+        frame_slider_layout.setSpacing(8)
+
+        frame_slider_layout.addWidget(QLabel("Frame"))
+        self.frame_slider = QSlider(Qt.Horizontal)
+        self.frame_slider.setRange(0, 0)
+        self.frame_slider.setValue(0)
+        self.frame_slider.valueChanged.connect(self.sync_frame_spin_from_slider)
+        frame_slider_layout.addWidget(self.frame_slider, 1)
+
+        main_layout.addWidget(frame_slider_box)
+
+    def open_image_stack(self, file_path):
+        lower_path = file_path.lower()
+
+        if lower_path.endswith(".edf"):
+            if fabio is None:
+                raise ImportError("fabio is required to read EDF files.")
+            data = np.asarray(fabio.open(file_path).data)
+            if data.ndim == 2:
+                return LazyImageStack(file_path, "edf", data=data, frame_count=1, shape=data.shape)
+            if data.ndim == 3:
+                return LazyImageStack(file_path, "edf", data=data, frame_count=data.shape[0], shape=data.shape[-2:])
+            raise ValueError("Unsupported EDF data dimensions.")
+
+        if lower_path.endswith((".h5", ".hdf5")):
+            if h5py is None:
+                raise ImportError("h5py is required to read HDF5 files.")
+            with h5py.File(file_path, "r") as handle:
+                dataset = self.find_first_image_dataset(handle)
+                if dataset is None:
+                    raise ValueError("No 2D or 3D image dataset found in HDF5 file.")
+                dataset_path = dataset.name
+                if dataset.ndim == 2:
+                    frame_count = 1
+                    shape = dataset.shape
+                elif dataset.ndim == 3:
+                    frame_count = dataset.shape[0]
+                    shape = dataset.shape[-2:]
+                else:
+                    raise ValueError("Unsupported HDF5 data dimensions.")
+            return LazyImageStack(file_path, "hdf5", dataset_path=dataset_path, frame_count=frame_count, shape=shape)
+
+        data = np.loadtxt(file_path)
+        if data.ndim == 2:
+            return LazyImageStack(file_path, "text", data=data, frame_count=1, shape=data.shape)
+        raise ValueError("Only 2D text data can be displayed as an image.")
+
+    def find_first_image_dataset(self, h5_group):
+        best_dataset = None
+
+        def visitor(name, obj):
+            nonlocal best_dataset
+            if best_dataset is not None:
+                return
+            if isinstance(obj, h5py.Dataset) and obj.ndim in (2, 3):
+                shape = obj.shape
+                if len(shape) == 2 and min(shape) > 16:
+                    best_dataset = obj
+                elif len(shape) == 3 and min(shape[-2:]) > 16:
+                    best_dataset = obj
+
+        h5_group.visititems(visitor)
+        return best_dataset
+
+    def update_frame_controls(self):
+        max_frame = 0 if self.sample_stack is None else max(0, self.sample_stack.frame_count - 1)
+
+        self.frame_slider.blockSignals(True)
+        self.frame_spin.blockSignals(True)
+        self.frame_slider.setRange(0, max_frame)
+        self.frame_spin.setRange(0, max_frame)
+        if self.frame_spin.value() > max_frame:
+            self.frame_spin.setValue(max_frame)
+            self.frame_slider.setValue(max_frame)
+        self.frame_slider.blockSignals(False)
+        self.frame_spin.blockSignals(False)
+
+    def display_image(self, ax, canvas, image, title):
+        ax.clear()
+        ax.set_title(title)
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+        if image is not None:
+            image = np.asarray(image, dtype=np.float64)
+            image = np.where(np.isfinite(image), image, np.nan)
+            ax.imshow(
+                image,
+                cmap="jet",
+                origin="upper",
+                vmin=self.contrast_vmin,
+                vmax=self.contrast_vmax,
+            )
+
+        canvas.draw_idle()
+
+    def block_contrast_signals(self, blocked):
+        self.intensity_min_spin.blockSignals(blocked)
+        self.intensity_max_spin.blockSignals(blocked)
+        self.intensity_min_slider.blockSignals(blocked)
+        self.intensity_max_slider.blockSignals(blocked)
+
+    def set_contrast_values(self, vmin, vmax):
+        if not np.isfinite(vmin) or not np.isfinite(vmax):
+            return
+        if vmax <= vmin:
+            vmax = vmin + 1.0
+
+        self.contrast_vmin = float(vmin)
+        self.contrast_vmax = float(vmax)
+        self.contrast_auto_initialized = True
+
+        self.block_contrast_signals(True)
+        self.intensity_min_spin.setValue(self.contrast_vmin)
+        self.intensity_max_spin.setValue(self.contrast_vmax)
+        self.intensity_min_slider.setValue(0)
+        self.intensity_max_slider.setValue(1000)
+        self.block_contrast_signals(False)
+
+        self.refresh_displayed_images()
+
+    def update_contrast_from_spins(self):
+        vmin = self.intensity_min_spin.value()
+        vmax = self.intensity_max_spin.value()
+        if vmax <= vmin:
+            vmax = vmin + 1.0
+            self.intensity_max_spin.blockSignals(True)
+            self.intensity_max_spin.setValue(vmax)
+            self.intensity_max_spin.blockSignals(False)
+
+        self.contrast_vmin = vmin
+        self.contrast_vmax = vmax
+        self.contrast_auto_initialized = True
+        self.refresh_displayed_images()
+
+    def update_contrast_from_sliders(self):
+        if self.contrast_vmin is None or self.contrast_vmax is None:
+            self.auto_contrast()
+            return
+
+        slider_min = self.intensity_min_slider.value()
+        slider_max = self.intensity_max_slider.value()
+        if slider_max <= slider_min:
+            slider_max = slider_min + 1
+            self.intensity_max_slider.blockSignals(True)
+            self.intensity_max_slider.setValue(slider_max)
+            self.intensity_max_slider.blockSignals(False)
+
+        current_span = max(self.contrast_vmax - self.contrast_vmin, 1.0)
+        center = (self.contrast_vmin + self.contrast_vmax) / 2.0
+        global_span = max(abs(center), current_span, 1.0) * 4.0
+        range_min = center - global_span
+        range_max = center + global_span
+
+        vmin = range_min + (range_max - range_min) * (slider_min / 1000.0)
+        vmax = range_min + (range_max - range_min) * (slider_max / 1000.0)
+
+        self.block_contrast_signals(True)
+        self.intensity_min_spin.setValue(vmin)
+        self.intensity_max_spin.setValue(vmax)
+        self.block_contrast_signals(False)
+
+        self.contrast_vmin = vmin
+        self.contrast_vmax = vmax
+        self.contrast_auto_initialized = True
+        self.refresh_displayed_images()
+
+    def auto_contrast(self):
+        frame = self.result_data
+        if frame is None and self.sample_stack is not None:
+            frame = self.sample_stack.get_frame(self.frame_spin.value())
+        if frame is None:
+            return
+
+        finite_values = np.asarray(frame, dtype=np.float64)
+        finite_values = finite_values[np.isfinite(finite_values)]
+        if finite_values.size == 0:
+            return
+
+        vmin, vmax = np.nanpercentile(finite_values, [1, 99])
+        self.set_contrast_values(vmin, vmax)
+
+    def refresh_displayed_images(self):
+        sample_frame = None
+        if self.sample_stack is not None:
+            sample_frame = self.sample_stack.get_frame(self.frame_spin.value())
+        self.display_image(self.original_ax, self.original_canvas, sample_frame, "Original file")
+
+        if self.result_data is not None:
+            self.display_image(self.result_ax, self.result_canvas, self.result_data, "Result")
+        else:
+            self.display_image(self.result_ax, self.result_canvas, None, "Result")
+
+    def update_sample_preview(self):
+        frame = None
+        if self.sample_stack is not None:
+            frame = self.sample_stack.get_frame(self.frame_spin.value())
+            if not self.contrast_auto_initialized:
+                finite_values = np.asarray(frame, dtype=np.float64)
+                finite_values = finite_values[np.isfinite(finite_values)]
+                if finite_values.size:
+                    vmin, vmax = np.nanpercentile(finite_values, [1, 99])
+                    self.set_contrast_values(vmin, vmax)
+        self.display_image(self.original_ax, self.original_canvas, frame, "Original file")
+        self.update_result_preview()
+
+    def update_result_preview(self):
+        sample_frame = None
+        background_frame = None
+        frame_index = self.frame_spin.value()
+
+        if self.sample_stack is not None:
+            sample_frame = self.sample_stack.get_frame(frame_index)
+        if self.background_stack is not None:
+            background_frame = self.background_stack.get_frame(frame_index)
+
+        if sample_frame is None:
+            self.result_data = None
+            self.display_image(self.result_ax, self.result_canvas, None, "Result")
+            return
+
+        if background_frame is None:
+            self.result_data = None
+            self.display_image(self.result_ax, self.result_canvas, None, "Result")
+            return
+
+        if sample_frame.shape != background_frame.shape:
+            self.result_data = None
+            self.status_label.setText("Sample and background frames do not have the same shape.")
+            self.display_image(self.result_ax, self.result_canvas, None, "Shape mismatch")
+            return
+
+        result = self.compute_result_frame(frame_index)
+        self.result_data = result
+        self.display_image(self.result_ax, self.result_canvas, result, "Result")
+        self.status_label.setText("Preview updated.")
+
+    def sync_frame_slider_from_spin(self, value):
+        if self.frame_slider.value() != value:
+            self.frame_slider.blockSignals(True)
+            self.frame_slider.setValue(value)
+            self.frame_slider.blockSignals(False)
+        self.update_sample_preview()
+
+    def sync_frame_spin_from_slider(self, value):
+        if self.frame_spin.value() != value:
+            self.frame_spin.blockSignals(True)
+            self.frame_spin.setValue(value)
+            self.frame_spin.blockSignals(False)
+        self.update_sample_preview()
 
     def set_working_folder(self, folder_path):
         self.current_folder = folder_path or ""
-        if folder_path and not self.output_folder_path:
+        if folder_path and hasattr(self, "output_folder_edit") and not self.output_folder_path:
             self.output_folder_path = folder_path
             self.output_folder_edit.setText(folder_path)
 
@@ -189,6 +559,19 @@ class BackgroundTab(QWidget):
             self.sample_file_edit.setText(file_path)
             self.set_working_folder(file_path.rsplit("/", 1)[0])
             self.folder_changed.emit(self.current_folder)
+            try:
+                self.sample_stack = self.open_image_stack(file_path)
+                self.contrast_auto_initialized = False
+                self.contrast_vmin = None
+                self.contrast_vmax = None
+                self.update_frame_controls()
+                self.update_sample_preview()
+                self.status_label.setText(f"Sample loaded: {self.sample_stack.frame_count} frame(s).")
+            except Exception as exc:
+                self.sample_stack = None
+                self.update_frame_controls()
+                self.display_image(self.original_ax, self.original_canvas, None, "Original file")
+                self.status_label.setText(f"Sample loading error: {exc}")
 
     def select_background_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -202,6 +585,444 @@ class BackgroundTab(QWidget):
             self.background_file_edit.setText(file_path)
             self.set_working_folder(file_path.rsplit("/", 1)[0])
             self.folder_changed.emit(self.current_folder)
+            try:
+                self.background_stack = self.open_image_stack(file_path)
+                self.update_result_preview()
+                self.status_label.setText(f"Background loaded: {self.background_stack.frame_count} frame(s).")
+            except Exception as exc:
+                self.background_stack = None
+                self.update_result_preview()
+                self.status_label.setText(f"Background loading error: {exc}")
+
+    def select_output_folder(self):
+        folder_path = QFileDialog.getExistingDirectory(
+            self,
+            "Select output folder",
+            self.current_folder,
+        )
+        if folder_path:
+            self.output_folder_path = folder_path
+            self.output_folder_edit.setText(folder_path)
+            self.set_working_folder(folder_path)
+            self.folder_changed.emit(self.current_folder)
+
+    def get_output_base_name(self):
+        if self.sample_file_path:
+            base_name = os.path.splitext(os.path.basename(self.sample_file_path))[0]
+        else:
+            base_name = "background_subtracted"
+        return f"{base_name}_background_subtracted"
+
+    def compute_result_frame(self, frame_index):
+        if self.sample_stack is None:
+            raise ValueError("No sample file loaded.")
+        if self.background_stack is None:
+            raise ValueError("No background file loaded.")
+
+        sample_frame = self.sample_stack.get_frame(frame_index)
+        background_frame = self.background_stack.get_frame(frame_index)
+
+        if sample_frame.shape != background_frame.shape:
+            raise ValueError("Sample and background frames do not have the same shape.")
+
+        result = sample_frame - self.background_scale_spin.value() * background_frame + self.offset_spin.value()
+        if not self.keep_negative_checkbox.isChecked():
+            result = np.maximum(result, 0)
+        return result
+
+    def save_current_frame(self):
+        if not self.output_folder_path:
+            self.status_label.setText("Select an output folder first.")
+            return
+
+        if EdfImage is None:
+            self.status_label.setText("fabio EDF support is not available.")
+            return
+
+        try:
+            frame_index = self.frame_spin.value()
+            result = self.compute_result_frame(frame_index)
+            base_name = self.get_output_base_name()
+
+            edf_path = os.path.join(
+                self.output_folder_path,
+                f"{base_name}_frame_{frame_index:04d}.edf",
+            )
+
+            edf_image = EdfImage(data=np.asarray(result, dtype=np.float32))
+            edf_image.write(edf_path)
+
+            if self.save_preview_checkbox.isChecked():
+                png_path = os.path.join(
+                    self.output_folder_path,
+                    f"{base_name}_frame_{frame_index:04d}.png",
+                )
+                self.result_canvas.figure.savefig(
+                    png_path,
+                    dpi=300,
+                    bbox_inches="tight",
+                )
+                self.log_text.append(f"Saved preview: {png_path}")
+
+            self.log_text.append(f"Saved EDF: {edf_path}")
+            self.status_label.setText("Current EDF frame saved.")
+
+        except Exception as exc:
+            self.status_label.setText(f"Save error: {exc}")
+
+    def save_all_frames_as_npy(self):
+        if not self.output_folder_path:
+            self.status_label.setText("Select an output folder first.")
+            return
+
+        if self.sample_stack is None or self.background_stack is None:
+            self.status_label.setText("Load both sample and background first.")
+            return
+
+        if EdfImage is None:
+            self.status_label.setText("fabio EDF support is not available.")
+            return
+
+        try:
+            frame_count = min(
+                self.sample_stack.frame_count,
+                self.background_stack.frame_count,
+            )
+
+            base_name = self.get_output_base_name()
+
+            for frame_index in range(frame_count):
+                result = self.compute_result_frame(frame_index)
+
+                edf_path = os.path.join(
+                    self.output_folder_path,
+                    f"{base_name}_frame_{frame_index:04d}.edf",
+                )
+
+                edf_image = EdfImage(data=np.asarray(result, dtype=np.float32))
+                edf_image.write(edf_path)
+
+                self.log_text.append(f"Saved EDF: {edf_path}")
+
+            self.status_label.setText(f"Saved {frame_count} EDF frame(s).")
+
+        except Exception as exc:
+            self.status_label.setText(f"Save all error: {exc}")
+
+    def run_background_subtraction(self):
+        if not self.sample_file_path:
+            self.status_label.setText("Select a sample file first.")
+            return
+
+        if not self.background_file_path:
+            self.status_label.setText("Select a background file first.")
+            return
+
+        if not self.output_folder_path:
+            self.status_label.setText("Select an output folder first.")
+            return
+
+        self.update_result_preview()
+        self.save_all_frames_as_npy()
+
+    def open_image_stack(self, file_path):
+        lower_path = file_path.lower()
+
+        if lower_path.endswith(".edf"):
+            if fabio is None:
+                raise ImportError("fabio is required to read EDF files.")
+            data = np.asarray(fabio.open(file_path).data)
+            if data.ndim == 2:
+                return LazyImageStack(file_path, "edf", data=data, frame_count=1, shape=data.shape)
+            if data.ndim == 3:
+                return LazyImageStack(file_path, "edf", data=data, frame_count=data.shape[0], shape=data.shape[-2:])
+            raise ValueError("Unsupported EDF data dimensions.")
+
+        if lower_path.endswith((".h5", ".hdf5")):
+            if h5py is None:
+                raise ImportError("h5py is required to read HDF5 files.")
+            with h5py.File(file_path, "r") as handle:
+                dataset = self.find_first_image_dataset(handle)
+                if dataset is None:
+                    raise ValueError("No 2D or 3D image dataset found in HDF5 file.")
+                dataset_path = dataset.name
+                if dataset.ndim == 2:
+                    frame_count = 1
+                    shape = dataset.shape
+                elif dataset.ndim == 3:
+                    frame_count = dataset.shape[0]
+                    shape = dataset.shape[-2:]
+                else:
+                    raise ValueError("Unsupported HDF5 data dimensions.")
+            return LazyImageStack(file_path, "hdf5", dataset_path=dataset_path, frame_count=frame_count, shape=shape)
+
+        data = np.loadtxt(file_path)
+        if data.ndim == 2:
+            return LazyImageStack(file_path, "text", data=data, frame_count=1, shape=data.shape)
+        raise ValueError("Only 2D text data can be displayed as an image.")
+
+    def find_first_image_dataset(self, h5_group):
+        best_dataset = None
+
+        def visitor(name, obj):
+            nonlocal best_dataset
+            if best_dataset is not None:
+                return
+            if isinstance(obj, h5py.Dataset) and obj.ndim in (2, 3):
+                shape = obj.shape
+                if len(shape) == 2 and min(shape) > 16:
+                    best_dataset = obj
+                elif len(shape) == 3 and min(shape[-2:]) > 16:
+                    best_dataset = obj
+
+        h5_group.visititems(visitor)
+        return best_dataset
+
+    def update_frame_controls(self):
+        max_frame = 0 if self.sample_stack is None else max(0, self.sample_stack.frame_count - 1)
+
+        self.frame_slider.blockSignals(True)
+        self.frame_spin.blockSignals(True)
+        self.frame_slider.setRange(0, max_frame)
+        self.frame_spin.setRange(0, max_frame)
+        if self.frame_spin.value() > max_frame:
+            self.frame_spin.setValue(max_frame)
+            self.frame_slider.setValue(max_frame)
+        self.frame_slider.blockSignals(False)
+        self.frame_spin.blockSignals(False)
+
+    def display_image(self, ax, canvas, image, title):
+        ax.clear()
+        ax.set_title(title)
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+        if image is not None:
+            image = np.asarray(image, dtype=np.float64)
+            image = np.where(np.isfinite(image), image, np.nan)
+            ax.imshow(
+                image,
+                cmap="jet",
+                origin="upper",
+                vmin=self.contrast_vmin,
+                vmax=self.contrast_vmax,
+            )
+
+        canvas.draw_idle()
+
+    def block_contrast_signals(self, blocked):
+        self.intensity_min_spin.blockSignals(blocked)
+        self.intensity_max_spin.blockSignals(blocked)
+        self.intensity_min_slider.blockSignals(blocked)
+        self.intensity_max_slider.blockSignals(blocked)
+
+    def set_contrast_values(self, vmin, vmax):
+        if not np.isfinite(vmin) or not np.isfinite(vmax):
+            return
+        if vmax <= vmin:
+            vmax = vmin + 1.0
+
+        self.contrast_vmin = float(vmin)
+        self.contrast_vmax = float(vmax)
+        self.contrast_auto_initialized = True
+
+        self.block_contrast_signals(True)
+        self.intensity_min_spin.setValue(self.contrast_vmin)
+        self.intensity_max_spin.setValue(self.contrast_vmax)
+        self.intensity_min_slider.setValue(0)
+        self.intensity_max_slider.setValue(1000)
+        self.block_contrast_signals(False)
+
+        self.refresh_displayed_images()
+
+    def update_contrast_from_spins(self):
+        vmin = self.intensity_min_spin.value()
+        vmax = self.intensity_max_spin.value()
+        if vmax <= vmin:
+            vmax = vmin + 1.0
+            self.intensity_max_spin.blockSignals(True)
+            self.intensity_max_spin.setValue(vmax)
+            self.intensity_max_spin.blockSignals(False)
+
+        self.contrast_vmin = vmin
+        self.contrast_vmax = vmax
+        self.contrast_auto_initialized = True
+        self.refresh_displayed_images()
+
+    def update_contrast_from_sliders(self):
+        if self.contrast_vmin is None or self.contrast_vmax is None:
+            self.auto_contrast()
+            return
+
+        slider_min = self.intensity_min_slider.value()
+        slider_max = self.intensity_max_slider.value()
+        if slider_max <= slider_min:
+            slider_max = slider_min + 1
+            self.intensity_max_slider.blockSignals(True)
+            self.intensity_max_slider.setValue(slider_max)
+            self.intensity_max_slider.blockSignals(False)
+
+        current_span = max(self.contrast_vmax - self.contrast_vmin, 1.0)
+        center = (self.contrast_vmin + self.contrast_vmax) / 2.0
+        global_span = max(abs(center), current_span, 1.0) * 4.0
+        range_min = center - global_span
+        range_max = center + global_span
+
+        vmin = range_min + (range_max - range_min) * (slider_min / 1000.0)
+        vmax = range_min + (range_max - range_min) * (slider_max / 1000.0)
+
+        self.block_contrast_signals(True)
+        self.intensity_min_spin.setValue(vmin)
+        self.intensity_max_spin.setValue(vmax)
+        self.block_contrast_signals(False)
+
+        self.contrast_vmin = vmin
+        self.contrast_vmax = vmax
+        self.contrast_auto_initialized = True
+        self.refresh_displayed_images()
+
+    def auto_contrast(self):
+        frame = self.result_data
+        if frame is None and self.sample_stack is not None:
+            frame = self.sample_stack.get_frame(self.frame_spin.value())
+        if frame is None:
+            return
+
+        finite_values = np.asarray(frame, dtype=np.float64)
+        finite_values = finite_values[np.isfinite(finite_values)]
+        if finite_values.size == 0:
+            return
+
+        vmin, vmax = np.nanpercentile(finite_values, [1, 99])
+        self.set_contrast_values(vmin, vmax)
+
+    def refresh_displayed_images(self):
+        sample_frame = None
+        if self.sample_stack is not None:
+            sample_frame = self.sample_stack.get_frame(self.frame_spin.value())
+        self.display_image(self.original_ax, self.original_canvas, sample_frame, "Original file")
+
+        if self.result_data is not None:
+            self.display_image(self.result_ax, self.result_canvas, self.result_data, "Result")
+        else:
+            self.display_image(self.result_ax, self.result_canvas, None, "Result")
+
+    def update_sample_preview(self):
+        frame = None
+        if self.sample_stack is not None:
+            frame = self.sample_stack.get_frame(self.frame_spin.value())
+            if not self.contrast_auto_initialized:
+                finite_values = np.asarray(frame, dtype=np.float64)
+                finite_values = finite_values[np.isfinite(finite_values)]
+                if finite_values.size:
+                    vmin, vmax = np.nanpercentile(finite_values, [1, 99])
+                    self.set_contrast_values(vmin, vmax)
+        self.display_image(self.original_ax, self.original_canvas, frame, "Original file")
+        self.update_result_preview()
+
+    def update_result_preview(self):
+        sample_frame = None
+        background_frame = None
+        frame_index = self.frame_spin.value()
+
+        if self.sample_stack is not None:
+            sample_frame = self.sample_stack.get_frame(frame_index)
+        if self.background_stack is not None:
+            background_frame = self.background_stack.get_frame(frame_index)
+
+        if sample_frame is None:
+            self.result_data = None
+            self.display_image(self.result_ax, self.result_canvas, None, "Result")
+            return
+
+        if background_frame is None:
+            self.result_data = None
+            self.display_image(self.result_ax, self.result_canvas, None, "Result")
+            return
+
+        if sample_frame.shape != background_frame.shape:
+            self.result_data = None
+            self.status_label.setText("Sample and background frames do not have the same shape.")
+            self.display_image(self.result_ax, self.result_canvas, None, "Shape mismatch")
+            return
+
+        result = sample_frame - self.background_scale_spin.value() * background_frame + self.offset_spin.value()
+        if not self.keep_negative_checkbox.isChecked():
+            result = np.maximum(result, 0)
+
+        self.result_data = result
+        self.display_image(self.result_ax, self.result_canvas, result, "Result")
+        self.status_label.setText("Preview updated.")
+
+    def sync_frame_slider_from_spin(self, value):
+        if self.frame_slider.value() != value:
+            self.frame_slider.blockSignals(True)
+            self.frame_slider.setValue(value)
+            self.frame_slider.blockSignals(False)
+        self.update_sample_preview()
+
+    def sync_frame_spin_from_slider(self, value):
+        if self.frame_spin.value() != value:
+            self.frame_spin.blockSignals(True)
+            self.frame_spin.setValue(value)
+            self.frame_spin.blockSignals(False)
+        self.update_sample_preview()
+
+    def set_working_folder(self, folder_path):
+        self.current_folder = folder_path or ""
+        if folder_path and hasattr(self, "output_folder_edit") and not self.output_folder_path:
+            self.output_folder_path = folder_path
+            self.output_folder_edit.setText(folder_path)
+
+    def set_folder_from_external_tab(self, folder_path):
+        self.set_working_folder(folder_path)
+
+    def select_sample_file(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select sample file",
+            self.current_folder,
+            "Data files (*.edf *.h5 *.hdf5 *.dat *.txt);;All files (*)",
+        )
+        if file_path:
+            self.sample_file_path = file_path
+            self.sample_file_edit.setText(file_path)
+            self.set_working_folder(file_path.rsplit("/", 1)[0])
+            self.folder_changed.emit(self.current_folder)
+            try:
+                self.sample_stack = self.open_image_stack(file_path)
+                self.contrast_auto_initialized = False
+                self.contrast_vmin = None
+                self.contrast_vmax = None
+                self.update_frame_controls()
+                self.update_sample_preview()
+                self.status_label.setText(f"Sample loaded: {self.sample_stack.frame_count} frame(s).")
+            except Exception as exc:
+                self.sample_stack = None
+                self.update_frame_controls()
+                self.display_image(self.original_ax, self.original_canvas, None, "Original file")
+                self.status_label.setText(f"Sample loading error: {exc}")
+
+    def select_background_file(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select background file",
+            self.current_folder,
+            "Data files (*.edf *.h5 *.hdf5 *.dat *.txt);;All files (*)",
+        )
+        if file_path:
+            self.background_file_path = file_path
+            self.background_file_edit.setText(file_path)
+            self.set_working_folder(file_path.rsplit("/", 1)[0])
+            self.folder_changed.emit(self.current_folder)
+            try:
+                self.background_stack = self.open_image_stack(file_path)
+                self.update_result_preview()
+                self.status_label.setText(f"Background loaded: {self.background_stack.frame_count} frame(s).")
+            except Exception as exc:
+                self.background_stack = None
+                self.update_result_preview()
+                self.status_label.setText(f"Background loading error: {exc}")
 
     def select_output_folder(self):
         folder_path = QFileDialog.getExistingDirectory(
@@ -228,10 +1049,5 @@ class BackgroundTab(QWidget):
             self.status_label.setText("Select an output folder first.")
             return
 
-        self.log_text.append("Background subtraction is not implemented yet.")
-        self.log_text.append(f"Sample: {self.sample_file_path}")
-        self.log_text.append(f"Background: {self.background_file_path}")
-        self.log_text.append(f"Factor: {self.background_scale_spin.value()}")
-        self.log_text.append(f"Offset: {self.offset_spin.value()}")
-        self.log_text.append(f"Frame: {self.frame_spin.value()}")
-        self.status_label.setText("Interface ready. Processing code can now be added.")
+        self.update_result_preview()
+        self.save_all_frames_as_npy()
