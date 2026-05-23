@@ -91,7 +91,7 @@ class AverageTab(QWidget):
         self.canvas_original.setMinimumWidth(0)
         self.canvas_original.setMinimumHeight(0)
         self.canvas_original.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.original_coordinate_label = QLabel("x = - | y = - | I = -")
+        self.original_coordinate_label = QLabel("x = - | y = - | q = - | I = -")
         self.original_coordinate_label.setMinimumHeight(28)
         self.original_coordinate_label.setAlignment(Qt.AlignCenter)
         self.original_coordinate_label.setStyleSheet(self.coordinate_label_style())
@@ -114,7 +114,7 @@ class AverageTab(QWidget):
         self.canvas_average.setMinimumWidth(0)
         self.canvas_average.setMinimumHeight(0)
         self.canvas_average.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.average_coordinate_label = QLabel("x = - | y = - | I = -")
+        self.average_coordinate_label = QLabel("x = - | y = - | q = - | I = -")
         self.average_coordinate_label.setMinimumHeight(28)
         self.average_coordinate_label.setAlignment(Qt.AlignCenter)
         self.average_coordinate_label.setStyleSheet(self.coordinate_label_style())
@@ -535,7 +535,7 @@ class AverageTab(QWidget):
         self.canvas_average.ax.clear()
         self.canvas_average.ax.set_axis_off()
         self.canvas_average.draw_idle()
-        self.average_coordinate_label.setText("x = - | y = - | I = -")
+        self.average_coordinate_label.setText("x = - | y = - | q = - | I = -")
 
     def invalidate_average(self):
         if self.average_image is None:

@@ -440,19 +440,19 @@ class ImageCanvas(FigureCanvas):
                     if 0 <= x_index < q_nx and 0 <= y_index < q_ny:
                         q_value = self.q_map[y_index, x_index]
                         if np.isfinite(q_value):
-                            q_text = f"{q_value:.6g}"
+                            q_text = f"{q_value:.6g} nm⁻¹"
 
                 if self.last_xc is not None and self.last_yc is not None:
                     dx = (x_index + 1) - self.last_xc
                     dy = (y_index + 1) - self.last_yc
                     psi = np.degrees(np.arctan2(dy, dx)) % 360.0
-                    psi_text = f"{psi:.3f}"
+                    psi_text = f"{psi:.3f}°"
 
                 self.coordinate_label.setText(
-                    f"ψ = {psi_text}° | q = {q_text} nm⁻¹ | I = {value_text}"
+                    f"ψ = {psi_text} | q = {q_text} | I = {value_text}"
                 )
             else:
-                self.coordinate_label.setText("ψ = -° | q = - | I = -")
+                self.coordinate_label.setText("ψ = - | q = - | I = -")
 
         if not self._dragging or event.inaxes != self.ax:
             return
@@ -783,7 +783,7 @@ class AzimuthalTab(QWidget):
         center_column_layout.addWidget(self.graph_coordinate_label, stretch=0)
 
         self.image_canvas = ImageCanvas()
-        self.image_coordinate_label = QLabel("ψ = -° | q = - | I = -")
+        self.image_coordinate_label = QLabel("ψ = - | q = - | I = -")
         self.image_coordinate_label.setMinimumHeight(28)
         self.image_coordinate_label.setAlignment(Qt.AlignCenter)
         self.image_coordinate_label.setStyleSheet("""
@@ -1055,7 +1055,7 @@ class AzimuthalTab(QWidget):
             self.clear_graph_coordinates()
             self.image_canvas.raw_image = None
             self.image_canvas.set_q_map(None)
-            self.image_coordinate_label.setText("ψ = -° | q = - | I = -")
+            self.image_coordinate_label.setText("ψ = - | q = - | I = -")
             clear_plot_canvas(self.canvas)
             clear_plot_canvas(self.image_canvas)
 
@@ -1408,9 +1408,9 @@ class AzimuthalTab(QWidget):
             self.image_canvas.set_q_map(q_map)
             self.image_canvas.show_image(image, self.center_x.value(), self.center_y.value(), mask=None)
             self.sync_image_intensity_sliders()
-            self.image_coordinate_label.setText("ψ = -° | q = - | I = -")
+            self.image_coordinate_label.setText("ψ = - | q = - | I = -")
         except Exception as error:
             self.image_canvas.raw_image = None
             self.image_canvas.set_q_map(None)
-            self.image_coordinate_label.setText("ψ = -° | q = - | I = -")
+            self.image_coordinate_label.setText("ψ = - | q = - | I = -")
             QMessageBox.warning(self, "Preview error", str(error))

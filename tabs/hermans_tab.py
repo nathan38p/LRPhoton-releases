@@ -576,19 +576,19 @@ class ImageCanvas(FigureCanvas):
                     if 0 <= x_index < q_nx and 0 <= y_index < q_ny:
                         q_value = self.q_map[y_index, x_index]
                         if np.isfinite(q_value):
-                            q_text = f"{q_value:.6g}"
+                            q_text = f"{q_value:.6g} nm⁻¹"
 
                 if self.last_xc is not None and self.last_yc is not None:
                     dx = (x_index + 1) - self.last_xc
                     dy = (y_index + 1) - self.last_yc
                     psi = (np.degrees(np.arctan2(dy, dx)) - self.reference_angle) % 360.0
-                    psi_text = f"{psi:.3f}"
+                    psi_text = f"{psi:.3f}°"
 
                 self.coordinate_label.setText(
-                    f"ψ = {psi_text}° | q = {q_text} nm⁻¹ | I = {value_text}"
+                    f"ψ = {psi_text} | q = {q_text} | I = {value_text}"
                 )
             else:
-                self.coordinate_label.setText("ψ = -° | q = - | I = -")
+                self.coordinate_label.setText("ψ = - | q = - | I = -")
 
         if not self._dragging or event.inaxes != self.ax:
             return
@@ -907,7 +907,7 @@ class HermansTab(QWidget):
 
         self.fit_mode_label = QLabel("Fit:")
         self.fit_with_data_radio = QRadioButton("With data")
-        self.manual_fit_radio = QRadioButton("Manual")
+        self.manual_fit_radio = QRadioButton("Manually")
         self.fit_with_data_radio.setChecked(True)
 
         self.fit_mode_group = QButtonGroup(self)
@@ -1182,7 +1182,7 @@ class HermansTab(QWidget):
         self.center_column_layout.insertWidget(0, self.plot_control_bar, stretch=0)
         self.center_column_layout.insertWidget(1, self.canvas, stretch=1)
         clear_plot_canvas(self.canvas)
-        self.graph_coordinate_label = QLabel("ψ = -° | I = -")
+        self.graph_coordinate_label = QLabel("ψ = - | I = -")
         self.graph_coordinate_label.setMinimumHeight(28)
         self.graph_coordinate_label.setAlignment(Qt.AlignCenter)
         self.graph_coordinate_label.setStyleSheet("""
@@ -1203,7 +1203,7 @@ class HermansTab(QWidget):
         self.image_canvas.setMinimumWidth(0)
         self.image_canvas.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
         image_layout.addWidget(self.image_canvas, stretch=1)
-        self.image_coordinate_label = QLabel("ψ = -° | q = - | I = -")
+        self.image_coordinate_label = QLabel("ψ = - | q = - | I = -")
         self.image_coordinate_label.setMinimumHeight(42)
         self.image_coordinate_label.setAlignment(Qt.AlignCenter)
         self.image_coordinate_label.setStyleSheet("""
@@ -1587,11 +1587,10 @@ class HermansTab(QWidget):
             return
 
         if self.is_anisotropy_mode():
-            self.graph_coordinate_label.setText("q = - nm⁻¹ | I = -")
+            self.graph_coordinate_label.setText("q = - | I = -")
         else:
             x_name, y_name = self.graph_coordinate_labels()
-            x_suffix = "°" if x_name == "ψ" else ""
-            self.graph_coordinate_label.setText(f"{x_name} = -{x_suffix} | {y_name} = -")
+            self.graph_coordinate_label.setText(f"{x_name} = - | {y_name} = -")
 
     def set_instrument_mode(self, mode):
         self.instrument_mode = mode

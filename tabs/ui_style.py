@@ -187,8 +187,8 @@ def make_matplotlib_toolbar_block(parent, title, toolbar, option_widgets=None, s
     toolbar.coordinates = False
     toolbar.setStyleSheet("""
         QToolBar {
-            background: #f4f4f4;
-            background-color: #f4f4f4;
+            background: #eeeeee;
+            background-color: #eeeeee;
             border: none;
             spacing: 6px;
         }

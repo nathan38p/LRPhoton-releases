@@ -181,7 +181,7 @@ class UnfoldTab(ViewTab):
         if image is None:
             return
 
-        unfolded_raw, unfolded_display, q_max = self.make_unfolded_images(image)
+        unfolded_raw, unfolded_display, q_min, q_max = self.make_unfolded_images(image)
         if unfolded_raw is None:
             super().update_image()
             self.update_pattern_preview()
@@ -189,9 +189,10 @@ class UnfoldTab(ViewTab):
 
         self.raw_current_img = unfolded_raw
         self.display_img = unfolded_display
+        self.unfold_q_min = q_min
         self.unfold_q_max = q_max
         aspect = "auto"
-        extent = [0.0, q_max, 0.0, 360.0]
+        extent = [q_min, q_max, 0.0, 360.0]
 
         if self.image_artist is None:
             self.image_artist = self.ax.imshow(
@@ -205,7 +206,7 @@ class UnfoldTab(ViewTab):
             )
             self.ax.set_aspect(aspect)
             self.ax.set_xlabel("q (nm⁻¹)")
-            self.ax.set_ylabel("Angle (°)")
+            self.ax.set_ylabel("ψ (°)")
             self.ax.set_axis_on()
             self.colorbar = self.fig.colorbar(
                 self.image_artist,
@@ -219,7 +220,7 @@ class UnfoldTab(ViewTab):
             self.image_artist.set_clim(self.vmin_spin.value(), self.vmax_spin.value())
             self.ax.set_aspect(aspect)
             self.ax.set_xlabel("q (nm⁻¹)")
-            self.ax.set_ylabel("Angle (°)")
+            self.ax.set_ylabel("ψ (°)")
             self.ax.set_axis_on()
 
         self._apply_unfold_figure_margins()
@@ -228,7 +229,7 @@ class UnfoldTab(ViewTab):
             self.ax.set_xlim(self._saved_xlim)
             self.ax.set_ylim(self._saved_ylim)
         else:
-            self.ax.set_xlim(0.0, q_max)
+            self.ax.set_xlim(q_min, q_max)
             self.ax.set_ylim(0.0, 360.0)
 
         total = self.n_frames if self.is_lazy_h5 else self.images.shape[0]
@@ -248,11 +249,11 @@ class UnfoldTab(ViewTab):
     def make_unfolded_images(self, image):
         geometry = self.get_q_geometry_from_header()
         if geometry is None:
-            return None, None, None
+            return None, None, None, None
 
         xc, yc, distance_m, pixel_x_mm, pixel_y_mm, wavelength_nm = geometry
         if distance_m <= 0 or pixel_x_mm <= 0 or pixel_y_mm <= 0 or wavelength_nm <= 0:
-            return None, None, None
+            return None, None, None, None
 
         raw = np.asarray(image, dtype=float)
         raw = raw.copy()
@@ -260,26 +261,26 @@ class UnfoldTab(ViewTab):
         display = self.prepare_display_image(raw)
         ny, nx = raw.shape
 
-        corners = np.array(
-            [
-                [0.0, 0.0],
-                [nx - 1.0, 0.0],
-                [0.0, ny - 1.0],
-                [nx - 1.0, ny - 1.0],
-            ]
-        )
-        dx_m = (corners[:, 0] - xc) * pixel_x_mm * 1e-3
-        dy_m = (corners[:, 1] - yc) * pixel_y_mm * 1e-3
+        yy, xx = np.indices(raw.shape, dtype=float)
+        finite_raw = np.isfinite(raw)
+        dx_m = (xx - xc) * pixel_x_mm * 1e-3
+        dy_m = (yy - yc) * pixel_y_mm * 1e-3
         r_m = np.sqrt(dx_m ** 2 + dy_m ** 2)
         two_theta = np.arctan2(r_m, distance_m)
-        q_max = float(np.nanmax((4.0 * np.pi / wavelength_nm) * np.sin(two_theta / 2.0)))
-        if not np.isfinite(q_max) or q_max <= 0:
-            return None, None, None
+        q_map = (4.0 * np.pi / wavelength_nm) * np.sin(two_theta / 2.0)
+        valid_q = q_map[finite_raw & np.isfinite(q_map)]
+        if valid_q.size == 0:
+            return None, None, None, None
+
+        q_min = float(np.nanmin(valid_q))
+        q_max = float(np.nanmax(valid_q))
+        if not np.isfinite(q_min) or not np.isfinite(q_max) or q_max <= q_min:
+            return None, None, None, None
 
         angle_bins = 720
         q_bins = int(np.clip(max(nx, ny), 256, 1400))
         angles = np.linspace(0.0, 360.0, angle_bins, endpoint=False)
-        q_values = np.linspace(0.0, q_max, q_bins)
+        q_values = np.linspace(q_min, q_max, q_bins)
 
         theta = -np.deg2rad(angles)[None, :]
         q_grid = q_values[:, None]
@@ -298,7 +299,7 @@ class UnfoldTab(ViewTab):
         unfolded_display = np.full((q_bins, angle_bins), np.nan, dtype=float)
         unfolded_raw[inside] = raw[y_index[inside], x_index[inside]]
         unfolded_display[inside] = display[y_index[inside], x_index[inside]]
-        return unfolded_raw.T, unfolded_display.T, q_max
+        return unfolded_raw.T, unfolded_display.T, q_min, q_max
 
     def sync_geometry_fields(self):
         if not hasattr(self, "geometry_fields"):
@@ -407,21 +408,22 @@ class UnfoldTab(ViewTab):
         if self.pan_image_from_motion(event):
             return
         if self.raw_current_img is None or event.inaxes != self.ax or event.xdata is None or event.ydata is None:
-            self.cursor_label.setText("q = - | angle = - | I = -")
+            self.cursor_label.setText("q = - | ψ = - | I = -")
             return
 
         q_value = float(event.xdata)
         angle = float(event.ydata) % 360.0
         angle_bins, q_bins = self.raw_current_img.shape
+        q_min = getattr(self, "unfold_q_min", 0.0)
         y_index = int(np.floor(angle / 360.0 * angle_bins))
         q_max = getattr(self, "unfold_q_max", None)
-        if q_max is None or q_max <= 0:
-            self.cursor_label.setText("q = - | angle = - | I = -")
+        if q_max is None or q_max <= q_min:
+            self.cursor_label.setText("q = - | ψ = - | I = -")
             return
 
-        x_index = int(round(q_value / q_max * (q_bins - 1)))
+        x_index = int(round((q_value - q_min) / (q_max - q_min) * (q_bins - 1)))
         if not (0 <= x_index < q_bins and 0 <= y_index < angle_bins):
-            self.cursor_label.setText("q = - | angle = - | I = -")
+            self.cursor_label.setText("q = - | ψ = - | I = -")
             return
 
         value = self.raw_current_img[y_index, x_index]
@@ -435,8 +437,8 @@ class UnfoldTab(ViewTab):
             value_text = f"{value:.8g}"
 
         self.cursor_label.setText(
-            f"q = {q_value:.6g} nm⁻¹ | angle = {angle:.3f}° | I = {value_text}"
+            f"q = {q_value:.6g} nm⁻¹ | ψ = {angle:.3f}° | I = {value_text}"
         )
 
     def on_mouse_leave(self, event):
-        self.cursor_label.setText("q = - | angle = - | I = -")
+        self.cursor_label.setText("q = - | ψ = - | I = -")

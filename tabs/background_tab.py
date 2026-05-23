@@ -133,7 +133,7 @@ class BackgroundTab(QWidget):
         self.original_canvas.setMinimumWidth(0)
         self.original_canvas.setMinimumHeight(0)
         self.original_ax = self.original_canvas.ax
-        self.original_coordinate_label = QLabel("x = - | y = - | I = -")
+        self.original_coordinate_label = QLabel("x = - | y = - | q = - | I = -")
         self.original_coordinate_label.setMinimumHeight(28)
         self.original_coordinate_label.setAlignment(Qt.AlignCenter)
         self.original_coordinate_label.setStyleSheet(self.coordinate_label_style())
@@ -283,7 +283,7 @@ class BackgroundTab(QWidget):
         self.result_canvas.setMinimumWidth(0)
         self.result_canvas.setMinimumHeight(0)
         self.result_ax = self.result_canvas.ax
-        self.result_coordinate_label = QLabel("x = - | y = - | I = -")
+        self.result_coordinate_label = QLabel("x = - | y = - | q = - | I = -")
         self.result_coordinate_label.setMinimumHeight(28)
         self.result_coordinate_label.setAlignment(Qt.AlignCenter)
         self.result_coordinate_label.setStyleSheet(self.coordinate_label_style())

@@ -897,8 +897,7 @@ class DatPlotTab(QWidget):
 
     def clear_graph_coordinates(self, event=None):
         x_name, y_name = self.graph_coordinate_labels()
-        x_suffix = "°" if x_name == "ψ" else ""
-        self.graph_coordinate_label.setText(f"{x_name} = -{x_suffix} | {y_name} = -")
+        self.graph_coordinate_label.setText(f"{x_name} = - | {y_name} = -")
 
     def curves_are_really_0_to_360(self):
         if not self.curves:

@@ -751,8 +751,8 @@ def main():
         }
 
         QGroupBox {
-            background-color: #f4f4f4;
-            border: 0px;
+            background-color: #eeeeee;
+            border: 1px solid #d8d8d8;
             border-radius: 10px;
             margin-top: 14px;
             padding: 4px;
@@ -765,6 +765,7 @@ def main():
             subcontrol-position: top left;
             left: 8px;
             padding: 0px 4px;
+            background-color: transparent;
             color: #222222;
             font-family: Arial;
             font-size: 12px;

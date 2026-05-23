@@ -420,7 +420,7 @@ class ViewTab(QWidget):
         center_layout.addLayout(image_area)
 
 
-        self.cursor_label = QLabel("x = - | y = - | I = -")
+        self.cursor_label = QLabel("x = - | y = - | q = - | I = -")
         self.cursor_label.setMinimumHeight(28)
         self.cursor_label.setAlignment(Qt.AlignCenter)
         self.cursor_label.setStyleSheet("""
@@ -1773,11 +1773,11 @@ class ViewTab(QWidget):
         if self.pan_image_from_motion(event):
             return
         if self.raw_current_img is None or event.inaxes != self.ax:
-            self.cursor_label.setText("x = - | y = - | I = - | q = -")
+            self.cursor_label.setText("x = - | y = - | q = - | I = -")
             return
 
         if event.xdata is None or event.ydata is None:
-            self.cursor_label.setText("x = - | y = - | I = - | q = -")
+            self.cursor_label.setText("x = - | y = - | q = - | I = -")
             return
 
         x_index = int(round(event.xdata))
@@ -1786,7 +1786,7 @@ class ViewTab(QWidget):
         ny, nx = self.raw_current_img.shape
 
         if not (0 <= x_index < nx and 0 <= y_index < ny):
-            self.cursor_label.setText("x = - | y = - | I = - | q = -")
+            self.cursor_label.setText("x = - | y = - | q = - | I = -")
             return
 
         value = self.raw_current_img[y_index, x_index]
@@ -1804,11 +1804,11 @@ class ViewTab(QWidget):
         q_text = "-" if q_value is None else f"{q_value:.6g} nm⁻¹"
 
         self.cursor_label.setText(
-            f"x = {x_index + 1} | y = {y_index + 1} | I = {value_text} | q = {q_text}"
+            f"x = {x_index + 1} | y = {y_index + 1} | q = {q_text} | I = {value_text}"
         )
 
     def on_mouse_leave(self, event):
-        self.cursor_label.setText("x = - | y = - | I = - | q = -")
+        self.cursor_label.setText("x = - | y = - | q = - | I = -")
 
     # ============================================================
     # SAVE

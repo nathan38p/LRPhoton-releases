@@ -7,6 +7,7 @@ import numpy as np
 from PySide6.QtCore import Qt, QEvent, QPoint
 from PySide6.QtWidgets import (
     QWidget,
+    QDialog,
     QVBoxLayout,
     QHBoxLayout,
     QLabel,
@@ -21,10 +22,14 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QSlider,
     QComboBox,
+    QListWidget,
 )
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
+from matplotlib.path import Path as MplPath
+from matplotlib.patches import Polygon as MplPolygon
+from matplotlib.patches import Rectangle as MplRectangle
 
 from .instrument_presets import (
     ID13_DEFAULT_CENTER_X,
@@ -336,6 +341,7 @@ def apply_central_symmetry_cave(
     use_id13_beamstop=False,
     beamstop_y=1376,
     expand_nan_neighbors=False,
+    extra_mask=None,
 ):
     source = image.astype(np.float64).copy()
     cave_mask = np.zeros(source.shape, dtype=bool)
@@ -392,6 +398,13 @@ def apply_central_symmetry_cave(
         source[y1:y2, x1:x2] = np.nan
         filled[y1:y2, x1:x2] = np.nan
 
+    if extra_mask is not None:
+        extra_mask = np.asarray(extra_mask, dtype=bool)
+        if extra_mask.shape == source.shape:
+            cave_mask |= extra_mask
+            source[extra_mask] = np.nan
+            filled[extra_mask] = np.nan
+
     missing_y, missing_x = np.where(cave_mask)
 
     for y, x in zip(missing_y, missing_x):
@@ -442,7 +455,7 @@ class ImageCanvas(FigureCanvas):
         self.image_name = image_name
 
     def coordinate_text(self, text):
-        if self.image_name:
+        if self.image_name and not text.endswith("= -"):
             return f"{self.image_name} | {text}"
         return text
 
@@ -621,7 +634,7 @@ class ImageCanvas(FigureCanvas):
             return
 
         if event.inaxes != self.ax or event.xdata is None or event.ydata is None:
-            self.coordinate_label.setText(self.coordinate_text("x = - | y = - | I = -"))
+            self.coordinate_label.setText("x = - | y = - | q = - | I = -")
             return
 
         x = int(round(event.xdata + 1))
@@ -643,7 +656,7 @@ class ImageCanvas(FigureCanvas):
                     if q_value is not None:
                         q_text = f"q = {q_value:.6g} nm⁻¹"
 
-        self.coordinate_label.setText(self.coordinate_text(f"x = {x} | y = {y} | {intensity_text} | {q_text}"))
+        self.coordinate_label.setText(self.coordinate_text(f"x = {x} | y = {y} | {q_text} | {intensity_text}"))
 
     def show_image(self, image, xc=None, yc=None, title="", vmin=None, vmax=None, white_mask=None):
         previous_xlim = self.ax.get_xlim() if self.image_artist is not None else None
@@ -698,6 +711,294 @@ class ImageCanvas(FigureCanvas):
         self.draw_idle()
 
 
+class ManualCaveCanvas(FigureCanvas):
+    def __init__(self, dialog, title):
+        self.dialog = dialog
+        self.title = title
+        self.image = None
+        self.fig = Figure()
+        self.ax = self.fig.add_subplot(111)
+        super().__init__(self.fig)
+        self.ax.set_axis_off()
+        self.fig.subplots_adjust(left=0.005, right=0.995, top=0.96, bottom=0.005)
+        self._drag_start = None
+        self._preview_patch = None
+        self.mpl_connect("button_press_event", self.on_press)
+        self.mpl_connect("button_release_event", self.on_release)
+        self.mpl_connect("motion_notify_event", self.on_motion)
+        self.mpl_connect("button_press_event", self.on_double_click)
+
+    def show_image(self, image, vmin=None, vmax=None, shapes=None, active_polygon=None):
+        self.image = image
+        self.ax.clear()
+        self.ax.set_axis_off()
+        self.ax.set_title(self.title, fontsize=10)
+
+        if image is not None:
+            display = image.astype(np.float64).copy()
+            display[~np.isfinite(display)] = np.nan
+            display[display < 0] = np.nan
+            with np.errstate(invalid="ignore", divide="ignore"):
+                display = np.log10(display + 1)
+            self.ax.imshow(display, origin="upper", cmap="jet", interpolation="nearest", vmin=vmin, vmax=vmax)
+
+        for shape in shapes or []:
+            self.add_shape_patch(shape, alpha=0.22)
+
+        if active_polygon and len(active_polygon) > 1:
+            patch = MplPolygon(active_polygon, closed=False, fill=False, edgecolor="#00ffff", linewidth=1.5)
+            self.ax.add_patch(patch)
+
+        self.ax.set_aspect("equal")
+        self.draw_idle()
+
+    def add_shape_patch(self, shape, alpha=0.22):
+        if shape["type"] == "rect":
+            x0, y0, x1, y1 = shape["points"]
+            patch = MplRectangle(
+                (min(x0, x1), min(y0, y1)),
+                abs(x1 - x0),
+                abs(y1 - y0),
+                facecolor="#00ffff",
+                edgecolor="#00a0a0",
+                linewidth=1.2,
+                alpha=alpha,
+            )
+        else:
+            patch = MplPolygon(
+                shape["points"],
+                closed=True,
+                facecolor="#00ffff",
+                edgecolor="#00a0a0",
+                linewidth=1.2,
+                alpha=alpha,
+            )
+        self.ax.add_patch(patch)
+
+    def on_press(self, event):
+        if self is not self.dialog.before_canvas:
+            return
+        if event.inaxes != self.ax or event.xdata is None or event.ydata is None or event.button != 1:
+            return
+
+        if self.dialog.current_tool == "Rectangle":
+            self._drag_start = (event.xdata, event.ydata)
+        else:
+            self.dialog.active_polygon.append((event.xdata, event.ydata))
+            self.dialog.refresh_preview()
+
+    def on_motion(self, event):
+        if self._drag_start is None or event.inaxes != self.ax or event.xdata is None or event.ydata is None:
+            return
+        self.dialog.refresh_preview()
+        x0, y0 = self._drag_start
+        patch = MplRectangle(
+            (min(x0, event.xdata), min(y0, event.ydata)),
+            abs(event.xdata - x0),
+            abs(event.ydata - y0),
+            facecolor="#00ffff",
+            edgecolor="#00a0a0",
+            linewidth=1.2,
+            alpha=0.18,
+        )
+        self.ax.add_patch(patch)
+        self.draw_idle()
+
+    def on_release(self, event):
+        if self._drag_start is None:
+            return
+        if event.inaxes == self.ax and event.xdata is not None and event.ydata is not None:
+            x0, y0 = self._drag_start
+            if abs(event.xdata - x0) >= 2 and abs(event.ydata - y0) >= 2:
+                self.dialog.add_shape("rect", (x0, y0, event.xdata, event.ydata))
+        self._drag_start = None
+
+    def on_double_click(self, event):
+        if event.dblclick and self.dialog.current_tool == "Polygon":
+            self.dialog.finish_polygon()
+
+
+class ManualCaveDialog(QDialog):
+    def __init__(self, parent, image, filled_image, shapes, display_limits):
+        super().__init__(parent)
+        self.setWindowTitle("Manual cave mask")
+        self.resize(1100, 720)
+        self.source_image = np.asarray(image, dtype=np.float64)
+        self.base_filled_image = np.asarray(filled_image, dtype=np.float64)
+        self.shapes = [self.copy_shape(shape) for shape in shapes]
+        self.current_tool = "Rectangle"
+        self.active_polygon = []
+        self.display_limits = display_limits
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
+
+        top = QHBoxLayout()
+        self.rect_button = QPushButton("Rectangle")
+        self.poly_button = QPushButton("Polygon")
+        self.finish_poly_button = QPushButton("Finish polygon")
+        self.delete_button = QPushButton("Delete selected")
+        self.clear_button = QPushButton("Clear")
+        self.apply_button = QPushButton("Apply")
+        self.close_button = QPushButton("Close")
+
+        self.rect_button.setCheckable(True)
+        self.poly_button.setCheckable(True)
+        self.rect_button.setChecked(True)
+
+        for widget in [
+            self.rect_button,
+            self.poly_button,
+            self.finish_poly_button,
+            self.delete_button,
+            self.clear_button,
+            self.apply_button,
+            self.close_button,
+        ]:
+            top.addWidget(widget)
+        top.addStretch(1)
+        layout.addLayout(top)
+
+        body = QHBoxLayout()
+        self.before_canvas = ManualCaveCanvas(self, "Before")
+        self.after_canvas = ManualCaveCanvas(self, "After")
+        body.addWidget(self.before_canvas, 1)
+        body.addWidget(self.after_canvas, 1)
+
+        side = QVBoxLayout()
+        side.addWidget(QLabel("Shapes"))
+        self.shape_list = QListWidget()
+        side.addWidget(self.shape_list, 1)
+        body.addLayout(side)
+        layout.addLayout(body, 1)
+
+        self.rect_button.clicked.connect(lambda: self.set_tool("Rectangle"))
+        self.poly_button.clicked.connect(lambda: self.set_tool("Polygon"))
+        self.finish_poly_button.clicked.connect(self.finish_polygon)
+        self.delete_button.clicked.connect(self.delete_selected_shape)
+        self.clear_button.clicked.connect(self.clear_shapes)
+        self.apply_button.clicked.connect(self.apply_to_parent)
+        self.close_button.clicked.connect(self.reject)
+
+        self.refresh_shape_list()
+        self.refresh_preview()
+
+    def copy_shape(self, shape):
+        if shape["type"] == "rect":
+            points = tuple(float(value) for value in shape["points"])
+        else:
+            points = [(float(x), float(y)) for x, y in shape["points"]]
+        return {"type": shape["type"], "points": points}
+
+    def set_tool(self, tool):
+        self.current_tool = tool
+        self.rect_button.setChecked(tool == "Rectangle")
+        self.poly_button.setChecked(tool == "Polygon")
+        self.active_polygon = []
+        self.refresh_preview()
+
+    def add_shape(self, shape_type, points):
+        self.shapes.append({"type": shape_type, "points": points})
+        self.refresh_shape_list()
+        self.refresh_preview()
+
+    def finish_polygon(self):
+        if len(self.active_polygon) >= 3:
+            self.add_shape("poly", list(self.active_polygon))
+        self.active_polygon = []
+        self.refresh_preview()
+
+    def delete_selected_shape(self):
+        row = self.shape_list.currentRow()
+        if 0 <= row < len(self.shapes):
+            del self.shapes[row]
+            self.refresh_shape_list()
+            self.refresh_preview()
+
+    def clear_shapes(self):
+        self.shapes = []
+        self.active_polygon = []
+        self.refresh_shape_list()
+        self.refresh_preview()
+
+    def refresh_shape_list(self):
+        self.shape_list.clear()
+        for index, shape in enumerate(self.shapes, 1):
+            label = "Rectangle" if shape["type"] == "rect" else "Polygon"
+            self.shape_list.addItem(f"{index:02d} - {label}")
+
+    def shape_mask(self):
+        mask = np.zeros(self.source_image.shape, dtype=bool)
+        ny, nx = mask.shape
+
+        for shape in self.shapes:
+            if shape["type"] == "rect":
+                x0, y0, x1, y1 = shape["points"]
+                xmin = max(0, int(np.floor(min(x0, x1))))
+                xmax = min(nx, int(np.ceil(max(x0, x1))))
+                ymin = max(0, int(np.floor(min(y0, y1))))
+                ymax = min(ny, int(np.ceil(max(y0, y1))))
+                mask[ymin:ymax, xmin:xmax] = True
+            else:
+                polygon = np.asarray(shape["points"], dtype=float)
+                if polygon.size == 0:
+                    continue
+                xmin = max(0, int(np.floor(np.nanmin(polygon[:, 0]))))
+                xmax = min(nx, int(np.ceil(np.nanmax(polygon[:, 0]))) + 1)
+                ymin = max(0, int(np.floor(np.nanmin(polygon[:, 1]))))
+                ymax = min(ny, int(np.ceil(np.nanmax(polygon[:, 1]))) + 1)
+                if xmin >= xmax or ymin >= ymax:
+                    continue
+                yy, xx = np.mgrid[ymin:ymax, xmin:xmax]
+                points = np.column_stack((xx.ravel(), yy.ravel()))
+                path = MplPath(shape["points"])
+                mask[ymin:ymax, xmin:xmax] |= path.contains_points(points).reshape((ymax - ymin, xmax - xmin))
+
+        return mask
+
+    def filled_image(self):
+        mask = self.shape_mask()
+        source = self.base_filled_image.copy()
+        source[mask] = np.nan
+        filled = source.copy()
+        xc = self.parent().xc_spin.value()
+        yc = self.parent().yc_spin.value()
+        ny, nx = source.shape
+
+        missing_y, missing_x = np.where(mask)
+        for y, x in zip(missing_y, missing_x):
+            xs = int(round(2 * xc - x))
+            ys = int(round(2 * yc - y))
+            if 0 <= xs < nx and 0 <= ys < ny:
+                value = source[ys, xs]
+                if np.isfinite(value):
+                    filled[y, x] = value
+        return filled
+
+    def refresh_preview(self):
+        vmin, vmax = self.display_limits
+        self.before_canvas.show_image(
+            self.source_image,
+            vmin=vmin,
+            vmax=vmax,
+            shapes=self.shapes,
+            active_polygon=self.active_polygon,
+        )
+        self.after_canvas.show_image(
+            self.filled_image(),
+            vmin=vmin,
+            vmax=vmax,
+            shapes=[],
+            active_polygon=None,
+        )
+
+    def apply_to_parent(self):
+        self.parent().manual_cave_shapes = [self.copy_shape(shape) for shape in self.shapes]
+        self.parent().refresh_preview()
+        self.accept()
+
+
 # ============================================================
 # =========================== CAVE TAB ========================
 # ============================================================
@@ -722,6 +1023,7 @@ class CaveTab(QWidget):
         self.image_clean = None
         self.image_filled = None
         self.cave_mask = None
+        self.manual_cave_shapes = []
         self.display_vmin = 0.0
         self.display_vmax = 1.0
         self.slider_scale = 1000
@@ -747,7 +1049,7 @@ class CaveTab(QWidget):
         original_layout = QVBoxLayout(original_box)
         original_layout.setContentsMargins(*GROUP_BOX_MARGINS)
         self.canvas_original = ImageCanvas()
-        self.original_coordinate_label = QLabel("Original | x = - | y = - | I = -")
+        self.original_coordinate_label = QLabel("x = - | y = - | q = - | I = -")
         self.original_coordinate_label.setMinimumHeight(28)
         self.original_coordinate_label.setAlignment(Qt.AlignCenter)
         self.original_coordinate_label.setStyleSheet("""
@@ -759,7 +1061,7 @@ class CaveTab(QWidget):
                 font-size: 11px;
             }
         """)
-        self.canvas_original.set_coordinate_label(self.original_coordinate_label, "Original")
+        self.canvas_original.set_coordinate_label(self.original_coordinate_label, "")
         self.canvas_original.set_q_calculator(self.calculate_q_at_pixel)
         original_layout.addWidget(self.canvas_original, stretch=1)
         original_layout.addWidget(self.original_coordinate_label, stretch=0)
@@ -774,7 +1076,7 @@ class CaveTab(QWidget):
         cave_layout = QVBoxLayout(cave_box)
         cave_layout.setContentsMargins(*GROUP_BOX_MARGINS)
         self.canvas_cave = ImageCanvas()
-        self.cave_coordinate_label = QLabel("Cave | x = - | y = - | I = -")
+        self.cave_coordinate_label = QLabel("x = - | y = - | q = - | I = -")
         self.cave_coordinate_label.setMinimumHeight(28)
         self.cave_coordinate_label.setAlignment(Qt.AlignCenter)
         self.cave_coordinate_label.setStyleSheet("""
@@ -786,7 +1088,7 @@ class CaveTab(QWidget):
                 font-size: 11px;
             }
         """)
-        self.canvas_cave.set_coordinate_label(self.cave_coordinate_label, "Cave")
+        self.canvas_cave.set_coordinate_label(self.cave_coordinate_label, "")
         self.canvas_cave.set_q_calculator(self.calculate_q_at_pixel)
         cave_layout.addWidget(self.canvas_cave, stretch=1)
         cave_layout.addWidget(self.cave_coordinate_label, stretch=0)
@@ -884,6 +1186,9 @@ class CaveTab(QWidget):
         self.expand_nan_neighbors_checkbox.setToolTip(
             "Expands the NaN mask by 2 pixels before central symmetry filling."
         )
+        self.manual_mask_button = QPushButton()
+        self.manual_mask_button.clicked.connect(self.open_manual_cave_dialog)
+        self.update_manual_mask_button_state()
 
         self.save_checkbox = QCheckBox("Save output after Run Cave")
         self.save_checkbox.setChecked(True)
@@ -891,6 +1196,7 @@ class CaveTab(QWidget):
         controls_layout.addLayout(nan_layout)
         controls_layout.addWidget(self.id13_beamstop_checkbox)
         controls_layout.addWidget(self.expand_nan_neighbors_checkbox)
+        controls_layout.addWidget(self.manual_mask_button)
 
         intensity_box = QGroupBox("Display intensity")
         intensity_layout = QGridLayout(intensity_box)
@@ -1001,6 +1307,7 @@ class CaveTab(QWidget):
             self.nan_threshold_spin,
             self.id13_beamstop_checkbox,
             self.expand_nan_neighbors_checkbox,
+            self.manual_mask_button,
             self.lock_intensity_checkbox,
             self.vmin_slider,
             self.vmax_slider,
@@ -1011,6 +1318,81 @@ class CaveTab(QWidget):
 
         self.update_frame_selector_visibility()
         self.update_beamstop_visibility()
+        self.update_manual_mask_button_state()
+
+    def is_development_copy(self):
+        return (Path(__file__).resolve().parents[1] / ".git").exists()
+
+    def update_manual_mask_button_state(self):
+        if not hasattr(self, "manual_mask_button"):
+            return
+
+        if self.is_development_copy():
+            self.manual_mask_button.setText("Manual cave mask")
+            self.manual_mask_button.setEnabled(self.image is not None)
+            self.manual_mask_button.setToolTip("")
+        else:
+            self.manual_mask_button.setText("🔒 Manual cave mask")
+            self.manual_mask_button.setEnabled(False)
+            self.manual_mask_button.setToolTip("Available in development mode only.")
+
+    def manual_cave_mask(self):
+        if self.image is None or not self.manual_cave_shapes:
+            return None
+
+        mask = np.zeros(self.image.shape, dtype=bool)
+        ny, nx = mask.shape
+
+        for shape in self.manual_cave_shapes:
+            if shape["type"] == "rect":
+                x0, y0, x1, y1 = shape["points"]
+                xmin = max(0, int(np.floor(min(x0, x1))))
+                xmax = min(nx, int(np.ceil(max(x0, x1))))
+                ymin = max(0, int(np.floor(min(y0, y1))))
+                ymax = min(ny, int(np.ceil(max(y0, y1))))
+                mask[ymin:ymax, xmin:xmax] = True
+            else:
+                polygon = np.asarray(shape["points"], dtype=float)
+                if polygon.size == 0:
+                    continue
+                xmin = max(0, int(np.floor(np.nanmin(polygon[:, 0]))))
+                xmax = min(nx, int(np.ceil(np.nanmax(polygon[:, 0]))) + 1)
+                ymin = max(0, int(np.floor(np.nanmin(polygon[:, 1]))))
+                ymax = min(ny, int(np.ceil(np.nanmax(polygon[:, 1]))) + 1)
+                if xmin >= xmax or ymin >= ymax:
+                    continue
+                yy, xx = np.mgrid[ymin:ymax, xmin:xmax]
+                points = np.column_stack((xx.ravel(), yy.ravel()))
+                path = MplPath(shape["points"])
+                mask[ymin:ymax, xmin:xmax] |= path.contains_points(points).reshape((ymax - ymin, xmax - xmin))
+
+        return mask
+
+    def open_manual_cave_dialog(self):
+        if not self.is_development_copy() or self.image is None:
+            return
+
+        use_id13_beamstop = self.instrument_mode == "ID13" and self.id13_beamstop_checkbox.isChecked()
+        _, automatic_filled, _ = apply_central_symmetry_cave(
+            self.image,
+            self.xc_spin.value(),
+            self.yc_spin.value(),
+            nan_operator=self.nan_operator_combo.currentText(),
+            nan_threshold=self.nan_threshold_spin.value(),
+            use_id13_beamstop=use_id13_beamstop,
+            beamstop_y=self.beamstop_y_spin.value(),
+            expand_nan_neighbors=self.expand_nan_neighbors_checkbox.isChecked(),
+        )
+
+        dialog = ManualCaveDialog(
+            self,
+            self.image,
+            automatic_filled,
+            self.manual_cave_shapes,
+            self.current_display_limits(),
+        )
+        dialog.exec()
+
     def auto_set_display_limits(self):
         if self.image is None:
             return
@@ -1355,6 +1737,7 @@ class CaveTab(QWidget):
             self.image_clean = None
             self.image_filled = None
             self.cave_mask = None
+            self.manual_cave_shapes = []
 
             self.set_controls_enabled(True)
             self.apply_instrument_preset()
@@ -1363,6 +1746,7 @@ class CaveTab(QWidget):
             self.update_frame_selector_visibility()
             self.auto_set_display_limits()
             self.refresh_preview()
+            self.update_manual_mask_button_state()
             self.update_status()
 
         except Exception as error:
@@ -1382,6 +1766,7 @@ class CaveTab(QWidget):
             self.image_clean = None
             self.image_filled = None
             self.cave_mask = None
+            self.manual_cave_shapes = []
 
             if not self.lock_intensity_checkbox.isChecked():
                 self.auto_set_display_limits()
@@ -1389,6 +1774,7 @@ class CaveTab(QWidget):
             self.update_beamstop_visibility()
             self.update_frame_selector_visibility()
             self.refresh_preview()
+            self.update_manual_mask_button_state()
             self.update_status()
         except Exception as error:
             QMessageBox.critical(self, "H5 frame reading error", str(error))
@@ -1408,6 +1794,7 @@ class CaveTab(QWidget):
             use_id13_beamstop=use_id13_beamstop,
             beamstop_y=self.beamstop_y_spin.value(),
             expand_nan_neighbors=self.expand_nan_neighbors_checkbox.isChecked(),
+            extra_mask=self.manual_cave_mask(),
         )
 
         self.image_clean = clean
