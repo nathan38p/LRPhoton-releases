@@ -797,7 +797,7 @@ def main():
     """)
 
     window = MainWindow()
-    window.show()
+    window.showMaximized()
     if window.can_check_for_updates():
         QTimer.singleShot(1200, lambda: window.check_for_updates(silent=window.silent_update_test))
     else:

@@ -1,13 +1,15 @@
+import fnmatch
 import re
 from pathlib import Path
 
 import h5py
 import numpy as np
 
-from PySide6.QtCore import Qt, QEvent, QPoint
+from PySide6.QtCore import Qt, QEvent, QPoint, QSize
 from PySide6.QtWidgets import (
     QWidget,
     QDialog,
+    QAbstractSpinBox,
     QVBoxLayout,
     QHBoxLayout,
     QLabel,
@@ -23,9 +25,16 @@ from PySide6.QtWidgets import (
     QSlider,
     QComboBox,
     QListWidget,
+    QListWidgetItem,
+    QButtonGroup,
+    QLineEdit,
+    QScrollArea,
+    QSizePolicy,
+    QSplitter,
 )
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 from matplotlib.path import Path as MplPath
 from matplotlib.patches import Polygon as MplPolygon
@@ -45,10 +54,14 @@ from .ui_style import (
     FRAME_COUNTER_WIDTH,
     FRAME_NAV_SPACING,
     FRAME_SPIN_WIDTH,
+    GROUP_BOX_STYLE,
     GROUP_BOX_MARGINS,
     PAGE_MARGINS,
+    PANEL_MARGINS,
+    make_matplotlib_toolbar_block,
     style_q_geometry_buttons,
 )
+from .file_ratings import install_file_rating_menu, set_item_file_path
 
 
 # ============================================================
@@ -720,19 +733,24 @@ class ManualCaveCanvas(FigureCanvas):
         self.ax = self.fig.add_subplot(111)
         super().__init__(self.fig)
         self.ax.set_axis_off()
-        self.fig.subplots_adjust(left=0.005, right=0.995, top=0.96, bottom=0.005)
+        self.fig.subplots_adjust(left=0.005, right=0.995, top=0.995, bottom=0.005)
         self._drag_start = None
+        self._last_pan_point = None
+        self._edit_state = None
         self._preview_patch = None
         self.mpl_connect("button_press_event", self.on_press)
         self.mpl_connect("button_release_event", self.on_release)
         self.mpl_connect("motion_notify_event", self.on_motion)
-        self.mpl_connect("button_press_event", self.on_double_click)
+        self.mpl_connect("scroll_event", self.on_scroll)
+        try:
+            self.grabGesture(Qt.PinchGesture)
+        except Exception:
+            pass
 
-    def show_image(self, image, vmin=None, vmax=None, shapes=None, active_polygon=None):
+    def show_image(self, image, vmin=None, vmax=None, shapes=None, active_polygon=None, xc=None, yc=None):
         self.image = image
         self.ax.clear()
         self.ax.set_axis_off()
-        self.ax.set_title(self.title, fontsize=10)
 
         if image is not None:
             display = image.astype(np.float64).copy()
@@ -742,8 +760,17 @@ class ManualCaveCanvas(FigureCanvas):
                 display = np.log10(display + 1)
             self.ax.imshow(display, origin="upper", cmap="jet", interpolation="nearest", vmin=vmin, vmax=vmax)
 
+            if xc is not None and yc is not None:
+                self.ax.axvline(xc, color="red", linewidth=1.0)
+                self.ax.axhline(yc, color="red", linewidth=1.0)
+                self.ax.plot(xc, yc, "wo", markersize=4)
+
         for shape in shapes or []:
             self.add_shape_patch(shape, alpha=0.22)
+
+        if self is self.dialog.before_canvas and self.dialog.selected_shape_index is not None:
+            if 0 <= self.dialog.selected_shape_index < len(self.dialog.shapes):
+                self.draw_selection_handles(self.dialog.shapes[self.dialog.selected_shape_index])
 
         if active_polygon and len(active_polygon) > 1:
             patch = MplPolygon(active_polygon, closed=False, fill=False, edgecolor="#00ffff", linewidth=1.5)
@@ -751,11 +778,198 @@ class ManualCaveCanvas(FigureCanvas):
 
         self.ax.set_aspect("equal")
         self.draw_idle()
+        self.dialog.apply_synced_view(source=self)
 
     def add_shape_patch(self, shape, alpha=0.22):
+        self.ax.add_patch(self.shape_to_patch(shape, alpha=alpha))
+
+    def draw_selection_handles(self, shape):
+        for x, y in self.dialog.shape_handles(shape):
+            self.ax.plot(x, y, "s", ms=5, mfc="white", mec="#00a0a0", mew=1.0)
+
+    def on_press(self, event):
+        if event.inaxes != self.ax or event.xdata is None or event.ydata is None or event.button != 1:
+            return
+
+        if self.dialog.current_tool == "Select":
+            hit = self.dialog.hit_test_shape(event.xdata, event.ydata)
+            if hit is not None:
+                self.dialog.select_shape(hit[0])
+                self._edit_state = {
+                    "shape_index": hit[0],
+                    "handle": hit[1],
+                    "last": (event.xdata, event.ydata),
+                }
+            return
+
+        if self is not self.dialog.before_canvas:
+            return
+
+        if self.dialog.current_tool == "Rectangle":
+            self._drag_start = (event.xdata, event.ydata)
+        elif self.dialog.current_tool in ("Vertical band", "Horizontal band"):
+            self._drag_start = (event.xdata, event.ydata)
+        else:
+            if event.dblclick:
+                self.dialog.finish_polygon()
+                return
+            self.dialog.active_polygon.append((event.xdata, event.ydata))
+            self.dialog.refresh_preview()
+
+    def on_motion(self, event):
+        if self._edit_state is not None:
+            if event.inaxes == self.ax and event.xdata is not None and event.ydata is not None:
+                last_x, last_y = self._edit_state["last"]
+                self.dialog.edit_shape(
+                    self._edit_state["shape_index"],
+                    self._edit_state["handle"],
+                    event.xdata,
+                    event.ydata,
+                    event.xdata - last_x,
+                    event.ydata - last_y,
+                )
+                self._edit_state["last"] = (event.xdata, event.ydata)
+            return
+
+        if self._drag_start is None or event.inaxes != self.ax or event.xdata is None or event.ydata is None:
+            return
+        self.dialog.refresh_preview()
+        x0, y0 = self._drag_start
+        patch = self.preview_patch(x0, y0, event.xdata, event.ydata)
+        self.ax.add_patch(patch)
+        self.draw_idle()
+
+    def on_release(self, event):
+        if self._edit_state is not None:
+            self._edit_state = None
+            return
+
+        if self._drag_start is None:
+            self._last_pan_point = None
+            return
+        if event.inaxes == self.ax and event.xdata is not None and event.ydata is not None:
+            x0, y0 = self._drag_start
+            if self.dialog.current_tool == "Rectangle" and abs(event.xdata - x0) >= 2 and abs(event.ydata - y0) >= 2:
+                self.dialog.add_shape("rect", (x0, y0, event.xdata, event.ydata))
+            elif self.dialog.current_tool == "Vertical band" and abs(event.ydata - y0) >= 2:
+                self.dialog.add_shape("vband", (x0, y0, event.xdata, event.ydata))
+            elif self.dialog.current_tool == "Horizontal band" and abs(event.xdata - x0) >= 2:
+                self.dialog.add_shape("hband", (x0, y0, event.xdata, event.ydata))
+        self._drag_start = None
+        self._last_pan_point = None
+
+    def on_scroll(self, event):
+        if event.inaxes != self.ax or event.xdata is None or event.ydata is None:
+            return
+
+        scale = 0.85 if event.button == "up" else 1.18
+        self.zoom_at(event.xdata, event.ydata, scale)
+
+    def event(self, event):
+        if self.image is not None:
+            try:
+                if event.type() == QEvent.NativeGesture:
+                    gesture_type = event.gestureType()
+                    value = event.value()
+                    if gesture_type == Qt.ZoomNativeGesture and value != 0:
+                        scale = 1.0 / (1.0 + value) if value > -0.95 else 1.25
+                        xdata, ydata = self.qt_pos_to_data(self.event_center_point(event))
+                        if xdata is not None and ydata is not None:
+                            self.zoom_at(xdata, ydata, scale)
+                            event.accept()
+                            return True
+
+                    if gesture_type == Qt.SmartZoomNativeGesture:
+                        self.dialog.reset_synced_view()
+                        event.accept()
+                        return True
+
+                if event.type() == QEvent.Gesture:
+                    pinch = event.gesture(Qt.PinchGesture)
+                    if pinch is not None:
+                        factor = pinch.scaleFactor()
+                        if factor and factor > 0:
+                            xdata, ydata = self.qt_pos_to_data(self.event_center_point(event))
+                            if xdata is not None and ydata is not None:
+                                self.zoom_at(xdata, ydata, 1.0 / factor)
+                                event.accept()
+                                return True
+            except Exception:
+                pass
+
+        return super().event(event)
+
+    def wheelEvent(self, event):
+        if self.image is None:
+            return super().wheelEvent(event)
+
+        delta = event.pixelDelta()
+        if delta.isNull():
+            delta = event.angleDelta()
+            dx = delta.x() / 120.0
+            dy = delta.y() / 120.0
+        else:
+            dx = delta.x() / 80.0
+            dy = delta.y() / 80.0
+
+        if event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier):
+            if dy != 0:
+                xdata, ydata = self.qt_pos_to_data(event.position())
+                if xdata is not None and ydata is not None:
+                    scale = 0.88 if dy > 0 else 1.14
+                    self.zoom_at(xdata, ydata, scale)
+        else:
+            x0, x1 = self.ax.get_xlim()
+            y0, y1 = self.ax.get_ylim()
+            xspan = x1 - x0
+            yspan = y1 - y0
+            shift_x = -dx * xspan * 0.08
+            shift_y = dy * yspan * 0.08
+            self.dialog.set_synced_limits((x0 + shift_x, x1 + shift_x), (y0 + shift_y, y1 + shift_y))
+
+        event.accept()
+
+    def event_center_point(self, event):
+        try:
+            position = event.position()
+            if position is not None:
+                return position
+        except Exception:
+            pass
+        return self.rect().center()
+
+    def qt_pos_to_data(self, qpoint):
+        try:
+            display_x = float(qpoint.x())
+            display_y = self.height() - float(qpoint.y())
+            return self.ax.transData.inverted().transform((display_x, display_y))
+        except Exception:
+            return None, None
+
+    def zoom_at(self, xdata, ydata, scale):
+        x0, x1 = self.ax.get_xlim()
+        y0, y1 = self.ax.get_ylim()
+        new_width = (x1 - x0) * scale
+        new_height = (y1 - y0) * scale
+        rel_x = (xdata - x0) / (x1 - x0) if x1 != x0 else 0.5
+        rel_y = (ydata - y0) / (y1 - y0) if y1 != y0 else 0.5
+        self.dialog.set_synced_limits(
+            (xdata - new_width * rel_x, xdata + new_width * (1 - rel_x)),
+            (ydata - new_height * rel_y, ydata + new_height * (1 - rel_y)),
+        )
+
+    def preview_patch(self, x0, y0, x1, y1):
+        shape = {"type": "rect", "points": (x0, y0, x1, y1)}
+        if self.dialog.current_tool == "Vertical band":
+            shape = {"type": "vband", "points": (x0, y0, x1, y1)}
+        elif self.dialog.current_tool == "Horizontal band":
+            shape = {"type": "hband", "points": (x0, y0, x1, y1)}
+        return self.shape_to_patch(shape, alpha=0.18)
+
+    def shape_to_patch(self, shape, alpha=0.22):
         if shape["type"] == "rect":
             x0, y0, x1, y1 = shape["points"]
-            patch = MplRectangle(
+            return MplRectangle(
                 (min(x0, x1), min(y0, y1)),
                 abs(x1 - x0),
                 abs(y1 - y0),
@@ -764,128 +978,165 @@ class ManualCaveCanvas(FigureCanvas):
                 linewidth=1.2,
                 alpha=alpha,
             )
-        else:
-            patch = MplPolygon(
-                shape["points"],
+
+        if shape["type"] in ("vband", "hband"):
+            return MplPolygon(
+                self.dialog.band_polygon(shape),
                 closed=True,
                 facecolor="#00ffff",
                 edgecolor="#00a0a0",
                 linewidth=1.2,
                 alpha=alpha,
             )
-        self.ax.add_patch(patch)
 
-    def on_press(self, event):
-        if self is not self.dialog.before_canvas:
-            return
-        if event.inaxes != self.ax or event.xdata is None or event.ydata is None or event.button != 1:
-            return
-
-        if self.dialog.current_tool == "Rectangle":
-            self._drag_start = (event.xdata, event.ydata)
-        else:
-            self.dialog.active_polygon.append((event.xdata, event.ydata))
-            self.dialog.refresh_preview()
-
-    def on_motion(self, event):
-        if self._drag_start is None or event.inaxes != self.ax or event.xdata is None or event.ydata is None:
-            return
-        self.dialog.refresh_preview()
-        x0, y0 = self._drag_start
-        patch = MplRectangle(
-            (min(x0, event.xdata), min(y0, event.ydata)),
-            abs(event.xdata - x0),
-            abs(event.ydata - y0),
+        return MplPolygon(
+            shape["points"],
+            closed=True,
             facecolor="#00ffff",
             edgecolor="#00a0a0",
             linewidth=1.2,
-            alpha=0.18,
+            alpha=alpha,
         )
-        self.ax.add_patch(patch)
-        self.draw_idle()
-
-    def on_release(self, event):
-        if self._drag_start is None:
-            return
-        if event.inaxes == self.ax and event.xdata is not None and event.ydata is not None:
-            x0, y0 = self._drag_start
-            if abs(event.xdata - x0) >= 2 and abs(event.ydata - y0) >= 2:
-                self.dialog.add_shape("rect", (x0, y0, event.xdata, event.ydata))
-        self._drag_start = None
-
-    def on_double_click(self, event):
-        if event.dblclick and self.dialog.current_tool == "Polygon":
-            self.dialog.finish_polygon()
 
 
 class ManualCaveDialog(QDialog):
     def __init__(self, parent, image, filled_image, shapes, display_limits):
         super().__init__(parent)
         self.setWindowTitle("Manual cave mask")
-        self.resize(1100, 720)
+        self.resize(1100, 620)
         self.source_image = np.asarray(image, dtype=np.float64)
         self.base_filled_image = np.asarray(filled_image, dtype=np.float64)
         self.shapes = [self.copy_shape(shape) for shape in shapes]
         self.current_tool = "Rectangle"
+        self.selected_shape_index = None
         self.active_polygon = []
         self.display_limits = display_limits
+        self.display_data_min, self.display_data_max = self.compute_display_range()
+        self._syncing_view = False
+        self.synced_xlim = None
+        self.synced_ylim = None
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(4)
 
         top = QHBoxLayout()
-        self.rect_button = QPushButton("Rectangle")
-        self.poly_button = QPushButton("Polygon")
-        self.finish_poly_button = QPushButton("Finish polygon")
-        self.delete_button = QPushButton("Delete selected")
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(6)
+        self.select_button = QPushButton("↔")
+        self.select_button.setToolTip("Move or resize selected shape")
+        self.rect_button = QPushButton("▭")
+        self.rect_button.setToolTip("Rectangle")
+        self.vband_button = QPushButton("▏")
+        self.vband_button.setToolTip("Vertical band")
+        self.hband_button = QPushButton("▔")
+        self.hband_button.setToolTip("Horizontal band")
+        self.poly_button = QPushButton("⬠")
+        self.poly_button.setToolTip("Polygon")
+        self.finish_poly_button = QPushButton("✓")
+        self.finish_poly_button.setToolTip("Finish polygon")
         self.clear_button = QPushButton("Clear")
         self.apply_button = QPushButton("Apply")
         self.close_button = QPushButton("Close")
 
+        self.select_button.setCheckable(True)
         self.rect_button.setCheckable(True)
+        self.vband_button.setCheckable(True)
+        self.hband_button.setCheckable(True)
         self.poly_button.setCheckable(True)
         self.rect_button.setChecked(True)
 
         for widget in [
+            self.select_button,
             self.rect_button,
+            self.vband_button,
+            self.hband_button,
             self.poly_button,
             self.finish_poly_button,
-            self.delete_button,
-            self.clear_button,
-            self.apply_button,
-            self.close_button,
         ]:
+            widget.setFixedSize(36, 30)
             top.addWidget(widget)
         top.addStretch(1)
         layout.addLayout(top)
 
         body = QHBoxLayout()
-        self.before_canvas = ManualCaveCanvas(self, "Before")
-        self.after_canvas = ManualCaveCanvas(self, "After")
-        body.addWidget(self.before_canvas, 1)
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(4)
+        left_panel = QVBoxLayout()
+        left_panel.setContentsMargins(0, 0, 0, 0)
+        left_panel.setSpacing(2)
+        self.before_canvas = ManualCaveCanvas(self, "")
+        self.after_canvas = ManualCaveCanvas(self, "")
+        toolbar = NavigationToolbar(self.before_canvas, self)
+        toolbar_box, _, _ = make_matplotlib_toolbar_block(self, "", toolbar, toolbar_width=270)
+        toolbar_box.setFixedHeight(48)
+        left_panel.addWidget(toolbar_box, 0)
+        left_panel.addWidget(self.before_canvas, 1)
+        body.addLayout(left_panel, 1)
+        arrow_label = QLabel("→")
+        arrow_label.setAlignment(Qt.AlignCenter)
+        arrow_label.setFixedWidth(24)
+        arrow_label.setStyleSheet("""
+            QLabel {
+                color: #444444;
+                font-size: 22px;
+                font-weight: 700;
+            }
+        """)
+        body.addWidget(arrow_label, 0)
         body.addWidget(self.after_canvas, 1)
 
         side = QVBoxLayout()
+        side.setContentsMargins(0, 0, 0, 0)
+        side.setSpacing(4)
         side.addWidget(QLabel("Shapes"))
         self.shape_list = QListWidget()
         side.addWidget(self.shape_list, 1)
+        side.addWidget(self.clear_button)
+        side.addWidget(self.apply_button)
+        side.addWidget(self.close_button)
         body.addLayout(side)
         layout.addLayout(body, 1)
 
+        intensity_layout = QGridLayout()
+        intensity_layout.setContentsMargins(0, 0, 0, 0)
+        intensity_layout.setHorizontalSpacing(8)
+        intensity_layout.setVerticalSpacing(2)
+        self.min_label = QLabel()
+        self.max_label = QLabel()
+        self.min_slider = QSlider(Qt.Horizontal)
+        self.max_slider = QSlider(Qt.Horizontal)
+        self.min_slider.setRange(0, 1000)
+        self.max_slider.setRange(0, 1000)
+        self.auto_button = QPushButton("Auto")
+        intensity_layout.addWidget(self.min_label, 0, 0)
+        intensity_layout.addWidget(self.min_slider, 0, 1)
+        intensity_layout.addWidget(self.max_label, 1, 0)
+        intensity_layout.addWidget(self.max_slider, 1, 1)
+        intensity_layout.addWidget(self.auto_button, 0, 2, 2, 1)
+        layout.addLayout(intensity_layout)
+
+        self.select_button.clicked.connect(lambda: self.set_tool("Select"))
         self.rect_button.clicked.connect(lambda: self.set_tool("Rectangle"))
+        self.vband_button.clicked.connect(lambda: self.set_tool("Vertical band"))
+        self.hband_button.clicked.connect(lambda: self.set_tool("Horizontal band"))
         self.poly_button.clicked.connect(lambda: self.set_tool("Polygon"))
         self.finish_poly_button.clicked.connect(self.finish_polygon)
-        self.delete_button.clicked.connect(self.delete_selected_shape)
         self.clear_button.clicked.connect(self.clear_shapes)
         self.apply_button.clicked.connect(self.apply_to_parent)
         self.close_button.clicked.connect(self.reject)
+        self.min_slider.valueChanged.connect(self.update_display_limits_from_sliders)
+        self.max_slider.valueChanged.connect(self.update_display_limits_from_sliders)
+        self.auto_button.clicked.connect(self.auto_display_limits)
 
         self.refresh_shape_list()
+        self.set_display_sliders_from_limits()
         self.refresh_preview()
 
     def copy_shape(self, shape):
         if shape["type"] == "rect":
+            points = tuple(float(value) for value in shape["points"])
+        elif shape["type"] in ("vband", "hband"):
             points = tuple(float(value) for value in shape["points"])
         else:
             points = [(float(x), float(y)) for x, y in shape["points"]]
@@ -893,9 +1144,67 @@ class ManualCaveDialog(QDialog):
 
     def set_tool(self, tool):
         self.current_tool = tool
+        self.select_button.setChecked(tool == "Select")
         self.rect_button.setChecked(tool == "Rectangle")
+        self.vband_button.setChecked(tool == "Vertical band")
+        self.hband_button.setChecked(tool == "Horizontal band")
         self.poly_button.setChecked(tool == "Polygon")
         self.active_polygon = []
+        self.refresh_preview()
+
+    def compute_display_range(self):
+        display = self.source_image.astype(np.float64).copy()
+        display[~np.isfinite(display)] = np.nan
+        display[display < 0] = np.nan
+        with np.errstate(invalid="ignore", divide="ignore"):
+            display = np.log10(display + 1)
+        finite = display[np.isfinite(display)]
+        if finite.size == 0:
+            return 0.0, 1.0
+        return float(np.nanmin(finite)), float(np.nanmax(finite))
+
+    def set_display_sliders_from_limits(self):
+        data_min, data_max = self.display_data_min, self.display_data_max
+        span = max(data_max - data_min, 1e-12)
+        vmin, vmax = self.display_limits
+        min_value = int(np.clip((vmin - data_min) / span * 1000.0, 0, 1000))
+        max_value = int(np.clip((vmax - data_min) / span * 1000.0, 0, 1000))
+        if max_value <= min_value:
+            max_value = min(1000, min_value + 1)
+        self.min_slider.blockSignals(True)
+        self.max_slider.blockSignals(True)
+        self.min_slider.setValue(min_value)
+        self.max_slider.setValue(max_value)
+        self.min_slider.blockSignals(False)
+        self.max_slider.blockSignals(False)
+        self.update_intensity_labels()
+
+    def update_intensity_labels(self):
+        vmin, vmax = self.display_limits
+        self.min_label.setText(f"Min: {vmin:.3g}")
+        self.max_label.setText(f"Max: {vmax:.3g}")
+
+    def update_display_limits_from_sliders(self):
+        min_value = self.min_slider.value()
+        max_value = self.max_slider.value()
+        if max_value <= min_value:
+            max_value = min(1000, min_value + 1)
+            self.max_slider.blockSignals(True)
+            self.max_slider.setValue(max_value)
+            self.max_slider.blockSignals(False)
+
+        data_min, data_max = self.display_data_min, self.display_data_max
+        span = max(data_max - data_min, 1e-12)
+        self.display_limits = (
+            data_min + span * min_value / 1000.0,
+            data_min + span * max_value / 1000.0,
+        )
+        self.update_intensity_labels()
+        self.refresh_preview()
+
+    def auto_display_limits(self):
+        self.display_limits = self.parent().current_display_limits()
+        self.set_display_sliders_from_limits()
         self.refresh_preview()
 
     def add_shape(self, shape_type, points):
@@ -911,6 +1220,9 @@ class ManualCaveDialog(QDialog):
 
     def delete_selected_shape(self):
         row = self.shape_list.currentRow()
+        self.delete_shape(row)
+
+    def delete_shape(self, row):
         if 0 <= row < len(self.shapes):
             del self.shapes[row]
             self.refresh_shape_list()
@@ -925,8 +1237,90 @@ class ManualCaveDialog(QDialog):
     def refresh_shape_list(self):
         self.shape_list.clear()
         for index, shape in enumerate(self.shapes, 1):
-            label = "Rectangle" if shape["type"] == "rect" else "Polygon"
-            self.shape_list.addItem(f"{index:02d} - {label}")
+            labels = {
+                "rect": "Rectangle",
+                "poly": "Polygon",
+                "vband": "Vertical band",
+                "hband": "Horizontal band",
+            }
+            label = labels.get(shape["type"], "Shape")
+            item = QListWidgetItem()
+            item.setSizeHint(QSize(240, 28))
+            row_widget = QWidget()
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(4, 2, 4, 2)
+            row_layout.setSpacing(6)
+
+            label_widget = QLabel(f"{index:02d} - {label}")
+            row_layout.addWidget(label_widget, 1)
+
+            remove_button = QPushButton("−")
+            remove_button.setFixedSize(22, 18)
+            remove_button.setToolTip("Remove this shape")
+            remove_button.setStyleSheet("""
+                QPushButton {
+                    background: #ffecec;
+                    color: #b00020;
+                    border: 1px solid #ffb3b3;
+                    border-radius: 8px;
+                    font-weight: bold;
+                    font-size: 11px;
+                    padding: 0px;
+                }
+                QPushButton:hover {
+                    background: #ffd6d6;
+                }
+            """)
+            remove_button.clicked.connect(lambda checked=False, row=index - 1: self.delete_shape(row))
+            row_layout.addWidget(remove_button, 0, Qt.AlignCenter)
+
+            self.shape_list.addItem(item)
+            self.shape_list.setItemWidget(item, row_widget)
+
+    def band_polygon(self, shape):
+        x0, y0, x1, y1, width = shape["points"]
+        half_width = max(float(width), 1.0) / 2.0
+
+        if shape["type"] == "vband":
+            return [
+                (x0 - half_width, y0),
+                (x0 + half_width, y0),
+                (x1 + half_width, y1),
+                (x1 - half_width, y1),
+            ]
+
+        return [
+            (x0, y0 - half_width),
+            (x1, y1 - half_width),
+            (x1, y1 + half_width),
+            (x0, y0 + half_width),
+        ]
+
+    def set_synced_limits(self, xlim, ylim):
+        self.synced_xlim = tuple(xlim)
+        self.synced_ylim = tuple(ylim)
+        for canvas in (self.before_canvas, self.after_canvas):
+            canvas.ax.set_xlim(self.synced_xlim)
+            canvas.ax.set_ylim(self.synced_ylim)
+            canvas.draw_idle()
+
+    def reset_synced_view(self):
+        self.synced_xlim = None
+        self.synced_ylim = None
+        self.refresh_preview()
+
+    def apply_synced_view(self, source=None):
+        if self.synced_xlim is None or self.synced_ylim is None:
+            if source is not None:
+                self.synced_xlim = tuple(source.ax.get_xlim())
+                self.synced_ylim = tuple(source.ax.get_ylim())
+            return
+
+        for canvas in (self.before_canvas, self.after_canvas):
+            if canvas is source:
+                continue
+            canvas.ax.set_xlim(self.synced_xlim)
+            canvas.ax.set_ylim(self.synced_ylim)
 
     def shape_mask(self):
         mask = np.zeros(self.source_image.shape, dtype=bool)
@@ -941,7 +1335,8 @@ class ManualCaveDialog(QDialog):
                 ymax = min(ny, int(np.ceil(max(y0, y1))))
                 mask[ymin:ymax, xmin:xmax] = True
             else:
-                polygon = np.asarray(shape["points"], dtype=float)
+                polygon_points = self.band_polygon(shape) if shape["type"] in ("vband", "hband") else shape["points"]
+                polygon = np.asarray(polygon_points, dtype=float)
                 if polygon.size == 0:
                     continue
                 xmin = max(0, int(np.floor(np.nanmin(polygon[:, 0]))))
@@ -952,7 +1347,7 @@ class ManualCaveDialog(QDialog):
                     continue
                 yy, xx = np.mgrid[ymin:ymax, xmin:xmax]
                 points = np.column_stack((xx.ravel(), yy.ravel()))
-                path = MplPath(shape["points"])
+                path = MplPath(polygon_points)
                 mask[ymin:ymax, xmin:xmax] |= path.contains_points(points).reshape((ymax - ymin, xmax - xmin))
 
         return mask
@@ -978,12 +1373,16 @@ class ManualCaveDialog(QDialog):
 
     def refresh_preview(self):
         vmin, vmax = self.display_limits
+        xc = self.parent().xc_spin.value()
+        yc = self.parent().yc_spin.value()
         self.before_canvas.show_image(
             self.source_image,
             vmin=vmin,
             vmax=vmax,
             shapes=self.shapes,
             active_polygon=self.active_polygon,
+            xc=xc,
+            yc=yc,
         )
         self.after_canvas.show_image(
             self.filled_image(),
@@ -991,6 +1390,8 @@ class ManualCaveDialog(QDialog):
             vmax=vmax,
             shapes=[],
             active_polygon=None,
+            xc=xc,
+            yc=yc,
         )
 
     def apply_to_parent(self):
@@ -1010,6 +1411,7 @@ class CaveTab(QWidget):
         super().__init__()
 
         self.current_file = None
+        self.current_folder = Path.home()
         self.file_type = None
         self.header = {}
         self.raw_header_text = ""
@@ -1046,9 +1448,13 @@ class CaveTab(QWidget):
         main_layout.addLayout(top_layout, stretch=1)
 
         original_box = QGroupBox("Original pattern")
+        original_box.setMinimumHeight(0)
+        original_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
         original_layout = QVBoxLayout(original_box)
         original_layout.setContentsMargins(*GROUP_BOX_MARGINS)
         self.canvas_original = ImageCanvas()
+        self.canvas_original.setMinimumHeight(0)
+        self.canvas_original.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
         self.original_coordinate_label = QLabel("x = - | y = - | q = - | I = -")
         self.original_coordinate_label.setMinimumHeight(28)
         self.original_coordinate_label.setAlignment(Qt.AlignCenter)
@@ -1066,16 +1472,89 @@ class CaveTab(QWidget):
         original_layout.addWidget(self.canvas_original, stretch=1)
         original_layout.addWidget(self.original_coordinate_label, stretch=0)
 
+        center_panel = QWidget()
+        center_panel.setFixedWidth(FILE_BROWSER_WIDTH)
+        center_layout = QVBoxLayout(center_panel)
+        center_layout.setContentsMargins(*PANEL_MARGINS)
+        center_layout.setSpacing(BLOCK_SPACING)
+
+        center_splitter = QSplitter(Qt.Vertical)
+        center_splitter.setChildrenCollapsible(False)
+        center_splitter.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Ignored)
+        center_layout.addWidget(center_splitter, stretch=1)
+
+        file_box = QGroupBox("File browser")
+        file_box.setStyleSheet(GROUP_BOX_STYLE)
+        file_box.setMinimumHeight(0)
+        file_box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Ignored)
+        file_layout = QVBoxLayout(file_box)
+        file_layout.setContentsMargins(*GROUP_BOX_MARGINS)
+        file_layout.setSpacing(6)
+
+        self.folder_path = QLineEdit(str(self.current_folder))
+        self.folder_path.returnPressed.connect(self.refresh_files)
+        file_layout.addWidget(self.folder_path)
+
+        browse_button = QPushButton("Browse")
+        browse_button.clicked.connect(self.choose_folder)
+        file_layout.addWidget(browse_button)
+
+        filters_layout = QGridLayout()
+
+        self.name_filter = QLineEdit("*")
+        self.extension_filter = QLineEdit("*.edf *.h5 *.hdf5")
+        self.name_filter.textChanged.connect(self.refresh_files)
+        self.extension_filter.textChanged.connect(self.refresh_files)
+
+        self.show_subfolders_checkbox = QCheckBox("Show subfolders")
+        self.show_subfolders_checkbox.setChecked(False)
+        self.show_subfolders_checkbox.stateChanged.connect(self.refresh_files)
+
+        refresh_button = QPushButton("Refresh")
+        refresh_button.clicked.connect(self.refresh_files)
+
+        filters_layout.addWidget(QLabel("Name:"), 0, 0)
+        filters_layout.addWidget(self.name_filter, 0, 1)
+        filters_layout.addWidget(QLabel("Extensions:"), 1, 0)
+        filters_layout.addWidget(self.extension_filter, 1, 1)
+        file_layout.addLayout(filters_layout)
+        file_layout.addWidget(self.show_subfolders_checkbox)
+        file_layout.addWidget(refresh_button)
+
+        self.file_list = QListWidget()
+        install_file_rating_menu(self.file_list)
+        self.file_list.currentItemChanged.connect(self.file_selection_changed)
+        self.file_list.itemClicked.connect(self.open_selected_file)
+        self.file_list.itemDoubleClicked.connect(self.open_selected_file)
+        self.file_list.setMinimumHeight(0)
+        file_layout.addWidget(self.file_list, stretch=1)
+
         controls_box = QGroupBox("Cave tools")
-        controls_box.setFixedWidth(FILE_BROWSER_WIDTH)
+        controls_box.setStyleSheet(GROUP_BOX_STYLE)
+        controls_box.setMinimumHeight(0)
+        controls_box.setMinimumWidth(0)
+        controls_box.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         controls_layout = QVBoxLayout(controls_box)
-        controls_layout.setContentsMargins(*GROUP_BOX_MARGINS)
-        controls_layout.setSpacing(6)
+        controls_layout.setContentsMargins(6, 18, 6, 6)
+        controls_layout.setSpacing(4)
+
+        controls_scroll = QScrollArea()
+        controls_scroll.setWidgetResizable(True)
+        controls_scroll.setFrameShape(QScrollArea.NoFrame)
+        controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        controls_scroll.setMinimumHeight(0)
+        controls_scroll.setMinimumWidth(0)
+        controls_scroll.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+        controls_scroll.setWidget(controls_box)
 
         cave_box = QGroupBox("Cave-filled pattern")
+        cave_box.setMinimumHeight(0)
+        cave_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
         cave_layout = QVBoxLayout(cave_box)
         cave_layout.setContentsMargins(*GROUP_BOX_MARGINS)
         self.canvas_cave = ImageCanvas()
+        self.canvas_cave.setMinimumHeight(0)
+        self.canvas_cave.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
         self.cave_coordinate_label = QLabel("x = - | y = - | q = - | I = -")
         self.cave_coordinate_label.setMinimumHeight(28)
         self.cave_coordinate_label.setAlignment(Qt.AlignCenter)
@@ -1094,18 +1573,26 @@ class CaveTab(QWidget):
         cave_layout.addWidget(self.cave_coordinate_label, stretch=0)
 
         top_layout.addWidget(original_box, stretch=1)
-        top_layout.addWidget(controls_box, stretch=0)
+        center_splitter.addWidget(file_box)
+        center_splitter.addWidget(controls_scroll)
+        center_splitter.setStretchFactor(0, 1)
+        center_splitter.setStretchFactor(1, 1)
+        center_splitter.setSizes([1, 1])
+
+        top_layout.addWidget(center_panel, stretch=0)
         top_layout.addWidget(cave_box, stretch=1)
         top_layout.setStretch(0, 1)
         top_layout.setStretch(1, 0)
         top_layout.setStretch(2, 1)
 
         self.open_button = QPushButton("Open EDF / H5")
+        self.open_button.setMinimumWidth(0)
         self.open_button.clicked.connect(self.open_file)
         controls_layout.addWidget(self.open_button)
 
         preset_layout = QHBoxLayout()
-        preset_layout.setSpacing(4)
+        preset_layout.setContentsMargins(0, 0, 0, 0)
+        preset_layout.setSpacing(3)
         self.btn_xenocs = QPushButton("XENOCS")
         self.btn_id02 = QPushButton("ID02")
         self.btn_id13 = QPushButton("ID13")
@@ -1129,25 +1616,46 @@ class CaveTab(QWidget):
             "XENOCS",
             self.q_manual_button,
         )
+        compact_widths = {
+            self.btn_xenocs: 66,
+            self.btn_id02: 48,
+            self.btn_id13: 48,
+            self.btn_custom: 60,
+            self.q_manual_button: 24,
+        }
+        for button, width in compact_widths.items():
+            button.setMinimumWidth(0)
+            button.setFixedWidth(width)
         controls_layout.addLayout(preset_layout)
 
         self.xc_spin = QDoubleSpinBox()
         self.xc_spin.setRange(-100000, 100000)
         self.xc_spin.setDecimals(13)
+        self.xc_spin.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.xc_spin.setMaximumWidth(148)
 
         self.yc_spin = QDoubleSpinBox()
         self.yc_spin.setRange(-100000, 100000)
         self.yc_spin.setDecimals(13)
+        self.yc_spin.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.yc_spin.setMaximumWidth(148)
 
         self.beamstop_y_spin = QDoubleSpinBox()
         self.beamstop_y_spin.setRange(0, 100000)
         self.beamstop_y_spin.setDecimals(0)
         self.beamstop_y_spin.setValue(1376)
+        self.beamstop_y_spin.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.beamstop_y_spin.setMaximumWidth(148)
 
         self.centre_x_label = QLabel("Center X:")
         self.centre_y_label = QLabel("Center Y:")
 
         form_layout = QGridLayout()
+        form_layout.setContentsMargins(0, 0, 0, 0)
+        form_layout.setHorizontalSpacing(4)
+        form_layout.setVerticalSpacing(4)
+        form_layout.setColumnStretch(0, 0)
+        form_layout.setColumnStretch(1, 1)
         form_layout.addWidget(self.centre_x_label, 0, 0)
         form_layout.addWidget(self.xc_spin, 0, 1)
         form_layout.addWidget(self.centre_y_label, 1, 0)
@@ -1167,21 +1675,28 @@ class CaveTab(QWidget):
 
         self.nan_operator_combo = QComboBox()
         self.nan_operator_combo.addItems(["<=", ">="])
+        self.nan_operator_combo.setFixedWidth(54)
 
         self.nan_threshold_spin = QDoubleSpinBox()
         self.nan_threshold_spin.setRange(-1e12, 1e12)
         self.nan_threshold_spin.setDecimals(6)
         self.nan_threshold_spin.setValue(-14)
+        self.nan_threshold_spin.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.nan_threshold_spin.setMaximumWidth(136)
 
         nan_layout = QGridLayout()
-        nan_layout.addWidget(QLabel("Set NaN if I"), 0, 0)
+        nan_layout.setContentsMargins(0, 0, 0, 0)
+        nan_layout.setHorizontalSpacing(4)
+        nan_layout.setVerticalSpacing(4)
+        nan_layout.setColumnStretch(2, 1)
+        nan_layout.addWidget(QLabel("NaN if I"), 0, 0)
         nan_layout.addWidget(self.nan_operator_combo, 0, 1)
         nan_layout.addWidget(self.nan_threshold_spin, 0, 2)
 
         self.id13_beamstop_checkbox = QCheckBox("Add ID13 beamstop mask")
         self.id13_beamstop_checkbox.setChecked(False)
 
-        self.expand_nan_neighbors_checkbox = QCheckBox("Test: expand NaN by 2 px")
+        self.expand_nan_neighbors_checkbox = QCheckBox("Expand NaN 2 px")
         self.expand_nan_neighbors_checkbox.setChecked(False)
         self.expand_nan_neighbors_checkbox.setToolTip(
             "Expands the NaN mask by 2 pixels before central symmetry filling."
@@ -1199,8 +1714,9 @@ class CaveTab(QWidget):
         controls_layout.addWidget(self.manual_mask_button)
 
         intensity_box = QGroupBox("Display intensity")
+        intensity_box.setMinimumWidth(0)
         intensity_layout = QGridLayout(intensity_box)
-        intensity_layout.setContentsMargins(*GROUP_BOX_MARGINS)
+        intensity_layout.setContentsMargins(6, 18, 6, 6)
         intensity_layout.setSpacing(4)
 
         self.vmin_slider = QSlider(Qt.Horizontal)
@@ -1294,10 +1810,6 @@ class CaveTab(QWidget):
 
     def set_controls_enabled(self, enabled):
         for widget in [
-            self.btn_xenocs,
-            self.btn_id02,
-            self.btn_id13,
-            self.btn_custom,
             self.xc_spin,
             self.yc_spin,
             self.beamstop_y_spin,
@@ -1319,6 +1831,15 @@ class CaveTab(QWidget):
         self.update_frame_selector_visibility()
         self.update_beamstop_visibility()
         self.update_manual_mask_button_state()
+
+        for button in [
+            self.btn_xenocs,
+            self.btn_id02,
+            self.btn_id13,
+            self.btn_custom,
+            self.q_manual_button,
+        ]:
+            button.setEnabled(True)
 
     def is_development_copy(self):
         return (Path(__file__).resolve().parents[1] / ".git").exists()
@@ -1344,29 +1865,54 @@ class CaveTab(QWidget):
         ny, nx = mask.shape
 
         for shape in self.manual_cave_shapes:
-            if shape["type"] == "rect":
-                x0, y0, x1, y1 = shape["points"]
-                xmin = max(0, int(np.floor(min(x0, x1))))
-                xmax = min(nx, int(np.ceil(max(x0, x1))))
-                ymin = max(0, int(np.floor(min(y0, y1))))
-                ymax = min(ny, int(np.ceil(max(y0, y1))))
-                mask[ymin:ymax, xmin:xmax] = True
-            else:
-                polygon = np.asarray(shape["points"], dtype=float)
-                if polygon.size == 0:
-                    continue
-                xmin = max(0, int(np.floor(np.nanmin(polygon[:, 0]))))
-                xmax = min(nx, int(np.ceil(np.nanmax(polygon[:, 0]))) + 1)
-                ymin = max(0, int(np.floor(np.nanmin(polygon[:, 1]))))
-                ymax = min(ny, int(np.ceil(np.nanmax(polygon[:, 1]))) + 1)
-                if xmin >= xmax or ymin >= ymax:
-                    continue
-                yy, xx = np.mgrid[ymin:ymax, xmin:xmax]
-                points = np.column_stack((xx.ravel(), yy.ravel()))
-                path = MplPath(shape["points"])
-                mask[ymin:ymax, xmin:xmax] |= path.contains_points(points).reshape((ymax - ymin, xmax - xmin))
+            self.shape_to_mask(mask, shape)
 
         return mask
+
+    def manual_band_polygon(self, shape):
+        x0, y0, x1, y1, width = shape["points"]
+        half_width = max(float(width), 1.0) / 2.0
+        if shape["type"] == "vband":
+            return [
+                (x0 - half_width, y0),
+                (x0 + half_width, y0),
+                (x1 + half_width, y1),
+                (x1 - half_width, y1),
+            ]
+        return [
+            (x0, y0 - half_width),
+            (x1, y1 - half_width),
+            (x1, y1 + half_width),
+            (x0, y0 + half_width),
+        ]
+
+    def shape_to_mask(self, mask, shape):
+        ny, nx = mask.shape
+        if shape["type"] == "rect":
+            x0, y0, x1, y1 = shape["points"]
+            xmin = max(0, int(np.floor(min(x0, x1))))
+            xmax = min(nx, int(np.ceil(max(x0, x1))))
+            ymin = max(0, int(np.floor(min(y0, y1))))
+            ymax = min(ny, int(np.ceil(max(y0, y1))))
+            mask[ymin:ymax, xmin:xmax] = True
+            return
+
+        polygon_points = self.manual_band_polygon(shape) if shape["type"] in ("vband", "hband") else shape["points"]
+        polygon = np.asarray(polygon_points, dtype=float)
+        if polygon.size == 0:
+            return
+
+        xmin = max(0, int(np.floor(np.nanmin(polygon[:, 0]))))
+        xmax = min(nx, int(np.ceil(np.nanmax(polygon[:, 0]))) + 1)
+        ymin = max(0, int(np.floor(np.nanmin(polygon[:, 1]))))
+        ymax = min(ny, int(np.ceil(np.nanmax(polygon[:, 1]))) + 1)
+        if xmin >= xmax or ymin >= ymax:
+            return
+
+        yy, xx = np.mgrid[ymin:ymax, xmin:xmax]
+        points = np.column_stack((xx.ravel(), yy.ravel()))
+        path = MplPath(polygon_points)
+        mask[ymin:ymax, xmin:xmax] |= path.contains_points(points).reshape((ymax - ymin, xmax - xmin))
 
     def open_manual_cave_dialog(self):
         if not self.is_development_copy() or self.image is None:
@@ -1692,13 +2238,91 @@ class CaveTab(QWidget):
             self.nan_threshold_spin.setValue(4e9)
             return
 
-    def open_file(self):
-        file_path, _ = QFileDialog.getOpenFileName(
+    def choose_folder(self):
+        folder = QFileDialog.getExistingDirectory(
             self,
-            "Open EDF or H5 file",
-            "",
-            "Data files (*.edf *.h5 *.hdf5);;EDF (*.edf);;HDF5 (*.h5 *.hdf5);;All files (*)",
+            "Choose folder",
+            str(self.current_folder),
         )
+
+        if folder:
+            self.current_folder = Path(folder)
+            self.folder_path.setText(str(self.current_folder))
+            self.refresh_files()
+
+    def refresh_files(self):
+        if not hasattr(self, "file_list"):
+            return
+
+        folder = Path(self.folder_path.text()).expanduser()
+
+        if not folder.exists():
+            QMessageBox.warning(
+                self,
+                "Folder not found",
+                "The selected folder does not exist."
+            )
+            return
+
+        self.current_folder = folder
+        self.file_list.clear()
+
+        extension_patterns = self.extension_filter.text().split()
+        name_pattern = self.name_filter.text().strip() or "*"
+        iterator = folder.rglob("*") if self.show_subfolders_checkbox.isChecked() else folder.glob("*")
+        files = []
+
+        for path in iterator:
+            if not path.is_file():
+                continue
+
+            lower_name = path.name.lower()
+            match_extension = any(
+                fnmatch.fnmatch(lower_name, pattern.lower())
+                for pattern in extension_patterns
+            )
+            match_name = fnmatch.fnmatch(path.name, name_pattern)
+
+            if match_extension and match_name:
+                files.append(path)
+
+        for path in sorted(files):
+            item_text = str(path.relative_to(folder))
+            self.file_list.addItem(item_text)
+            item = self.file_list.item(self.file_list.count() - 1)
+            set_item_file_path(item, path)
+
+    def file_selection_changed(self, current, previous):
+        if current is None:
+            return
+
+        self.open_selected_file(current)
+
+    def open_selected_file(self, item=None):
+        if item is None:
+            item = self.file_list.currentItem()
+
+        if item is None:
+            return
+
+        stored_path = item.data(Qt.UserRole)
+
+        if not stored_path:
+            return
+
+        self.open_file(Path(stored_path).expanduser().resolve())
+
+    def open_file(self, file_path=None):
+        if isinstance(file_path, bool):
+            file_path = None
+
+        if file_path is None:
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Open EDF or H5 file",
+                str(self.current_folder),
+                "Data files (*.edf *.h5 *.hdf5);;EDF (*.edf);;HDF5 (*.h5 *.hdf5);;All files (*)",
+            )
 
         if not file_path:
             return
@@ -1732,6 +2356,9 @@ class CaveTab(QWidget):
                 raise ValueError("Unsupported file format. Please select an EDF, H5 or HDF5 file.")
 
             self.current_file = path
+            self.current_folder = path.parent
+            if hasattr(self, "folder_path"):
+                self.folder_path.setText(str(self.current_folder))
             self.header = header
             self.image = image.astype(np.float64)
             self.image_clean = None
