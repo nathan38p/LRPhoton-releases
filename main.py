@@ -400,6 +400,11 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(self.pages_scroll_area)
 
+        # Prevent child widgets with fixed preferred sizes from forcing the
+        # top-level window wider than the Windows/UTM desktop.
+        container.setMinimumSize(0, 0)
+        self.pages_scroll_area.setMinimumSize(0, 0)
+        self.pages.setMinimumSize(0, 0)
         self.setCentralWidget(container)
         self.show()
         QApplication.processEvents()
@@ -414,15 +419,15 @@ class MainWindow(QMainWindow):
 
         geometry = screen.availableGeometry()
 
-        # Windows maximized windows can still slightly overflow when custom
-        # title bars / DPI scaling are involved. Start with a geometry a few
-        # pixels smaller than the available area before maximizing.
+        # On Windows inside UTM, Qt/QEMU can report a maximized size that is a
+        # few pixels larger than the visible guest desktop. Do not use
+        # showMaximized() here: use the available desktop geometry directly so
+        # the window fills the screen without being clipped by the taskbar or
+        # by UTM scaling.
         if sys.platform.startswith("win"):
-            self.setMinimumSize(900, 620)
-            self.setGeometry(
-                geometry.adjusted(8, 8, -8, -8)
-            )
-            QTimer.singleShot(0, self.showMaximized)
+            self.setMinimumSize(760, 560)
+            self.setGeometry(geometry)
+            QTimer.singleShot(0, lambda: self.setGeometry(QApplication.primaryScreen().availableGeometry()))
             return
 
         # macOS fullscreen/maximized behaviour is cleaner with the exact
