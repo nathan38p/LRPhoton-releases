@@ -384,7 +384,7 @@ class MainWindow(QMainWindow):
         # ============================================================
 
         self.pages = QStackedWidget()
-        loading_label = QLabel("Loading LRPhoton...")
+        loading_label = QLabel("Loading...")
         loading_label.setAlignment(Qt.AlignCenter)
         loading_label.setStyleSheet("""
             QLabel {
