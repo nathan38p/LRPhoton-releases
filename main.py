@@ -851,7 +851,7 @@ class MainWindow(QMainWindow):
         detail = f"\n\nSystem error: {error}" if error else ""
         return (
             "LRPhoton found an update, but the installation folder is not writable.\n\n"
-            "If you do not have administrator rights, install the update manually:\n"
+            "If LRPhoton cannot write to its installation folder, install the update manually:\n"
             f"1. Open {GITHUB_URL}\n"
             "2. Click the green Code button, then Download ZIP.\n"
             "3. Extract the ZIP.\n"
@@ -1084,11 +1084,11 @@ class MainWindow(QMainWindow):
             self.available_update_sha = remote_sha
             write_error = self.get_app_dir_write_error()
             if write_error is not None:
-                self.set_update_button_state("available", "Update needs admin")
+                self.set_update_button_state("available", "Update needs write access")
                 if not silent and not self.silent_update_test:
                     QMessageBox.warning(
                         self,
-                        "Update needs administrator rights",
+                        "Update needs write access",
                         self.update_permission_message(write_error),
                     )
                 return
@@ -1147,10 +1147,10 @@ class MainWindow(QMainWindow):
         if write_error is not None:
             QMessageBox.warning(
                 self,
-                "Update needs administrator rights",
+                "Update needs write access",
                 self.update_permission_message(write_error),
             )
-            self.set_update_button_state("available", "Update needs admin")
+            self.set_update_button_state("available", "Update needs write access")
             return
 
         self.set_update_button_state("disabled", "Updating…")
