@@ -1278,10 +1278,18 @@ class DatPlotTab(QWidget):
             file.write("# LRPhoton multi-curve dat\n")
             file.write("# Each curve uses two columns: x_i y_i\n")
             for item in selected:
-                file.write("# curve " + json.dumps({"label": item["legend"], "axis": item["axis"]}, ensure_ascii=False) + "\n")
+                file.write("# curve " + json.dumps(
+                    {
+                        "label": item["legend"],
+                        "axis": item["axis"],
+                        "x_label": item.get("x_label", ""),
+                        "y_label": item.get("y_label", ""),
+                    },
+                    ensure_ascii=False,
+                ) + "\n")
             headers = []
             for index, item in enumerate(selected, start=1):
-                headers.extend([f"x{index}", f"y{index}"])
+                headers.extend([item.get("x_label") or f"x{index}", item.get("y_label") or f"y{index}"])
             file.write("# " + " ".join(headers) + "\n")
 
             for row in range(max_len):
@@ -1380,6 +1388,8 @@ class DatPlotTab(QWidget):
                     "original_y": y.copy(),
                     "legend": legend,
                     "axis": normalize_plot_axis(loaded_curve.get("axis", "left")),
+                    "x_label": loaded_curve.get("x_label", ""),
+                    "y_label": loaded_curve.get("y_label", ""),
                     "color": default_color(index),
                 }
 
@@ -2612,13 +2622,29 @@ class DatPlotTab(QWidget):
             ax.set_xlim(0, 360)
             ax.set_xlabel(default_x_label)
         else:
-            default_x_label = self.q_axis_label()
+            curve_x_labels = [
+                str(curve.get("x_label", "")).strip()
+                for curve in self.curves.values()
+                if str(curve.get("x_label", "")).strip()
+            ]
+            default_x_label = curve_x_labels[0] if curve_x_labels else self.q_axis_label()
             ax.set_xlabel(self.x_label.text() or default_x_label)
+            if curve_x_labels and (not self.x_label.text() or self.x_label.text() == self.q_axis_label()):
+                ax.set_xlabel(default_x_label)
+        axis_curve_labels = {}
+        for axis_name in PLOT_Y_AXES:
+            labels = [
+                str(curve.get("y_label", "")).strip()
+                for curve in self.curves.values()
+                if normalize_plot_axis(curve.get("axis", "left")) == axis_name and str(curve.get("y_label", "")).strip()
+            ]
+            if labels:
+                axis_curve_labels[axis_name] = labels[0]
         axis_labels = {
-            "left": "q²I(q)" if mode == "Kratky" else (self.y_label.text() or "Intensity / a.u."),
-            "left2": "Left 2 / a.u.",
-            "right": "Right / a.u.",
-            "right2": "Right 2 / a.u.",
+            "left": axis_curve_labels.get("left") or ("q²I(q)" if mode == "Kratky" else (self.y_label.text() or "Intensity / a.u.")),
+            "left2": axis_curve_labels.get("left2") or "Left 2 / a.u.",
+            "right": axis_curve_labels.get("right") or "Right / a.u.",
+            "right2": axis_curve_labels.get("right2") or "Right 2 / a.u.",
         }
         for axis_name, target_ax in axis_map.items():
             target_ax.set_ylabel(axis_labels[axis_name])
