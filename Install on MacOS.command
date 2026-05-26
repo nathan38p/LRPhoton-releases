@@ -39,7 +39,11 @@ fi
 echo "Creating LRPhoton.app launcher..."
 rm -rf "$LAUNCHER_APP"
 
-osacompile -o "$LAUNCHER_APP" -e "do shell script \"cd '$APP_DIR' && /usr/bin/env python3 main.py >> '$LOG_FILE' 2>&1 &\""
+osacompile -o "$LAUNCHER_APP" \
+    -e "on run" \
+    -e "do shell script \"cd '$APP_DIR' && PATH=/Library/Frameworks/Python.framework/Versions/3.14/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin nohup /usr/bin/env python3 main.py >> '$LOG_FILE' 2>&1 < /dev/null &\"" \
+    -e "quit" \
+    -e "end run"
 
 if [ -f "$APP_DIR/assets/LRPhoton.icns" ]; then
     cp "$APP_DIR/assets/LRPhoton.icns" "$LAUNCHER_APP/Contents/Resources/applet.icns"

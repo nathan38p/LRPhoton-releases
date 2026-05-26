@@ -15,9 +15,9 @@ winget install --id Python.Python.3.14 -v 3.14.5 --architecture x64 -e
 if errorlevel 1 (
     echo.
     echo ERROR: Python 3.14.5 x64 could not be installed with winget.
-    echo Install Python 3.14.5 x64 manually, then relaunch Install.bat.
+    echo Install Python 3.14.5 x64 manually, then relaunch Install on Windows.bat.
     echo.
-    echo Press any key to close Install.bat...
+    echo Press any key to close Install on Windows.bat...
     pause
     exit /b 1
 )
@@ -38,9 +38,9 @@ if errorlevel 1 (
     if errorlevel 1 (
         echo.
         echo ERROR: Python is still not detected after installation.
-        echo Restart Windows then relaunch Install.bat.
+        echo Restart Windows then relaunch Install on Windows.bat.
         echo.
-        echo Press any key to close and relaunch Install.bat...
+        echo Press any key to close and relaunch Install on Windows.bat...
         pause
         exit /b 1
     )
@@ -72,7 +72,7 @@ mkdir "%DEST%" >nul 2>&1
 
 echo.
 if /I "%SOURCE_FULL%"=="%DEST_FULL%" (
-    echo Install.bat is already running from the installation folder.
+    echo Install on Windows.bat is already running from the installation folder.
     echo Skipping file copy.
 ) else (
     echo Copying files...
@@ -91,7 +91,7 @@ if /I "%SOURCE_FULL%"=="%DEST_FULL%" (
         echo 4. Copy the contents of the LRPhoton folder into:
         echo    %DEST_FULL%
         echo.
-        echo Press any key to close Install.bat...
+        echo Press any key to close Install on Windows.bat...
         pause
         exit /b 1
     )
@@ -117,7 +117,7 @@ if errorlevel 1 (
     echo.
     echo ERROR: Some dependencies could not be installed.
     echo.
-    echo Press any key to close Install.bat...
+    echo Press any key to close Install on Windows.bat...
     pause
     exit /b 1
 )
@@ -138,7 +138,7 @@ if errorlevel 1 (
     echo.
     echo ERROR: Could not create desktop shortcut.
     echo.
-    echo Press any key to close Install.bat...
+    echo Press any key to close Install on Windows.bat...
     pause
     exit /b 1
 )
@@ -154,5 +154,5 @@ echo.
 echo Desktop shortcut created:
 echo LRPhoton
 echo.
-echo Press any key to close Install.bat...
+echo Press any key to close Install on Windows.bat...
 pause
