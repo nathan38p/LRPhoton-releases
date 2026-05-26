@@ -14,7 +14,7 @@ The installer will:
 
 * install Python automatically if it is missing
 * install all required Python dependencies
-* copy the application into C:\Program Files\LRPhoton
+* copy the application into `%LOCALAPPDATA%\Programs\LRPhoton`
 * create a desktop shortcut automatically
 
 Important:

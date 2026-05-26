@@ -856,10 +856,10 @@ class MainWindow(QMainWindow):
             "2. Click the green Code button, then Download ZIP.\n"
             "3. Extract the ZIP.\n"
             "4. Open the extracted LRPhoton folder.\n"
-            "5. Copy its contents into C:\\Program Files\\LRPhoton "
-            "(or C:\\Programmes\\LRPhoton if that is where LRPhoton is installed), "
+            f"5. Copy its contents into {Path(__file__).resolve().parent}, "
             "replacing the existing files.\n\n"
-            "If Windows refuses the copy, ask someone with administrator rights to do this step."
+            "If Windows refuses the copy, check that LRPhoton is closed and that "
+            "the installation folder is writable."
             f"{detail}"
         )
 
