@@ -1250,7 +1250,7 @@ class HermansTab(QWidget):
 
         self.order_background_spin = add_order_slider(0, "Background", 30.0, 20.0, 40.0, decimals=3, suffix=" a.u.")
         self.order_center_spin = add_order_slider(1, "Center", 1.0, 0.0, 360.0, decimals=3, suffix=" °")
-        self.order_amp_spin = add_order_slider(2, "Amp init", 200.0, 0.0, 300.0, decimals=3, suffix=" a.u.")
+        self.order_amp_spin = add_order_slider(2, "Amp init", 1000.0, 0.0, 1000.0, decimals=3, suffix=" a.u.")
         self.order_width_spin = add_order_slider(3, "Width init", 8.0, 0.001, 60.0, decimals=3, suffix=" °")
         self.order_q_spin = add_order_spin(4, 0, "Q", 6.35, 0.0, 20.0, decimals=4, suffix=" nm⁻¹")
         self.order_ratio_spin = add_order_spin(4, 2, "r", 0.001, 0.0, 0.999999, decimals=4)
@@ -1568,7 +1568,7 @@ class HermansTab(QWidget):
         self.btn_custom.clicked.connect(lambda: self.set_instrument_mode("Custom"))
         self.line_params_button = QPushButton("+")
         self.line_params_button.setFixedWidth(28)
-        self.line_params_button.setToolTip("Edit pyFAI geometry parameters")
+        self.line_params_button.setToolTip("Edit geometry and wavelength parameters")
         self.line_params_button.clicked.connect(self.open_geometry_dialog)
 
         for button in [
@@ -1591,7 +1591,7 @@ class HermansTab(QWidget):
         self.center_y_spin.setMinimumWidth(90)
         self.center_x_spin.valueChanged.connect(self.calculate_anisotropy)
         self.center_y_spin.valueChanged.connect(self.calculate_anisotropy)
-        image_layout.insertLayout(0, instrument_layout)
+        params_layout.addLayout(instrument_layout, 7, 0, 1, 5)
         for widget in [
             self.peak_spin,
             self.window_spin,
@@ -1711,7 +1711,7 @@ class HermansTab(QWidget):
 
         for widget in getattr(self, "anisotropy_param_widgets", []):
             if widget is not None:
-                widget.setVisible(anisotropy_mode)
+                widget.setVisible(anisotropy_mode or order_mode)
 
         for widget in getattr(self, "order_param_widgets", []):
             if widget is not None:
@@ -1725,7 +1725,10 @@ class HermansTab(QWidget):
             getattr(self, "line_params_button", None),
         ]:
             if widget is not None:
-                widget.setVisible(anisotropy_mode)
+                widget.setVisible(anisotropy_mode or order_mode)
+
+        if order_mode:
+            self.apply_order_wavelength_from_instrument()
 
         if hasattr(self, "plot_control_bar"):
             self.plot_control_bar.setVisible(True)
@@ -2010,8 +2013,27 @@ class HermansTab(QWidget):
 
         style_q_geometry_buttons(buttons, mode, self.line_params_button)
 
+        if self.is_order_mode():
+            self.apply_order_wavelength_from_instrument()
+            self.update_order_preview()
+            self.schedule_order_fit()
+            return
+
         self.apply_instrument_preset()
         self.calculate_anisotropy()
+
+    def apply_order_wavelength_from_instrument(self):
+        if not hasattr(self, "order_wavelength_spin"):
+            return
+
+        geometry = self.current_anisotropy_geometry()
+        wavelength = geometry.get("wavelength")
+        if wavelength is None:
+            return
+
+        self.order_wavelength_spin.blockSignals(True)
+        self.order_wavelength_spin.setValue(float(wavelength))
+        self.order_wavelength_spin.blockSignals(False)
 
     def set_center_spins(self, x_value, y_value):
         self.center_x_spin.blockSignals(True)
@@ -2656,7 +2678,7 @@ class HermansTab(QWidget):
             self.order_amp_spin,
             amplitude,
             amplitude - 10.0,
-            max(300.0, amplitude),
+            max(1000.0, amplitude),
         )
 
     def schedule_order_fit(self):
