@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QSlider,
     QSizePolicy,
     QSplitter,
+    QStyle,
 )
 
 from .cave_tab import (
@@ -346,6 +347,7 @@ class AverageTab(QWidget):
         self.run_button.clicked.connect(self.run_average)
 
         self.save_button = QPushButton("Save Average")
+        self.save_button.setIcon(self.style().standardIcon(QStyle.SP_DialogSaveButton))
         self.save_button.setStyleSheet(average_button_style)
         self.save_button.clicked.connect(self.save_average)
 
@@ -822,39 +824,17 @@ class AverageTab(QWidget):
         first_path = self.sources[0]["path"]
         start = self.frame_start_spin.value()
         end = self.frame_end_spin.value()
-
-        if self.first_edf_header_text:
-            suggested_path = first_path.parent / f"{first_path.stem}_{start}-{end}_averaged.edf"
-            output_path, _ = QFileDialog.getSaveFileName(
-                self,
-                "Save average EDF",
-                str(suggested_path),
-                "EDF (*.edf);;HDF5 (*.h5);;All files (*)",
-            )
-        else:
-            suggested_path = first_path.parent / f"{first_path.stem}_{start}-{end}_averaged.h5"
-            output_path, _ = QFileDialog.getSaveFileName(
-                self,
-                "Save average H5",
-                str(suggested_path),
-                "HDF5 (*.h5);;EDF (*.edf);;All files (*)",
-            )
-
-        if not output_path:
-            return
-
-        output_path = self._ensure_averaged_suffix(output_path, start, end)
+        source_suffix = first_path.suffix.lower()
+        output_suffix = ".edf" if source_suffix == ".edf" and self.first_edf_header_text else ".h5"
+        output_path = first_path.parent / f"{first_path.stem}_{start}-{end}_averaged{output_suffix}"
 
         try:
-            lower_path = output_path.lower()
-            if lower_path.endswith(".edf"):
+            if output_path.suffix.lower() == ".edf":
                 if not self.first_edf_header_text:
                     raise ValueError("Saving as EDF requires at least one EDF source file for the header.")
                 write_edf_file(output_path, self.average_image, self.first_edf_header_text, self.first_edf_byte_order)
                 self.status.append(f"\nSaved average EDF:\n{output_path}")
             else:
-                if not lower_path.endswith((".h5", ".hdf5")):
-                    output_path += ".h5"
                 write_average_h5_file(output_path, self.average_image, [source["path"] for source in self.sources], start, end)
                 self.status.append(f"\nSaved average H5:\n{output_path}")
         except Exception as error:

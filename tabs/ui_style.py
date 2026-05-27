@@ -1,5 +1,9 @@
+import re
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtWidgets import QGroupBox, QVBoxLayout, QHBoxLayout, QToolButton, QStyle
+from PySide6.QtGui import QValidator
+from PySide6.QtWidgets import QDoubleSpinBox, QGroupBox, QVBoxLayout, QHBoxLayout, QToolButton, QStyle
 
 
 GROUP_BOX_STYLE = """
@@ -68,6 +72,62 @@ FRAME_COUNTER_WIDTH = 56
 FILE_BROWSER_WIDTH = 320
 MATPLOTLIB_TOOLBAR_ICON_SCALE = 0.8
 MATPLOTLIB_TOOLBAR_MAX_HEIGHT = 42
+
+
+def normalize_decimal_text(text):
+    text = str(text).strip().replace(" ", "")
+    if "," in text and "." in text:
+        if text.rfind(",") > text.rfind("."):
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", "")
+    else:
+        text = text.replace(",", ".")
+    return text
+
+
+def decimal_number_text(text):
+    match = re.search(r"[-+]?(?:\d[\d.,]*|[\d.,]*\d)(?:[eE][-+]?\d+)?", str(text))
+    return normalize_decimal_text(match.group(0)) if match else ""
+
+
+class FlexibleDoubleSpinBox(QDoubleSpinBox):
+    """QDoubleSpinBox accepting both comma and point decimal separators."""
+
+    def validate(self, text, pos):
+        normalized = decimal_number_text(text)
+        if text.strip() in {"", "-", "+", ",", ".", "-,", "-.", "+,", "+."}:
+            state = QValidator.Intermediate
+        elif not normalized:
+            state = QValidator.Invalid
+        else:
+            try:
+                value = float(normalized)
+            except ValueError:
+                state = QValidator.Invalid
+            else:
+                state = QValidator.Acceptable if self.minimum() <= value <= self.maximum() else QValidator.Intermediate
+        return state, text, pos
+
+    def valueFromText(self, text):
+        try:
+            return float(decimal_number_text(text))
+        except ValueError:
+            return self.value()
+
+    def textFromValue(self, value):
+        try:
+            decimals = max(0, int(self.decimals()))
+            quant = Decimal(1).scaleb(-decimals)
+            number = Decimal(str(value)).quantize(quant, rounding=ROUND_HALF_UP)
+            text = format(number, "f")
+        except (InvalidOperation, ValueError):
+            text = super().textFromValue(value)
+
+        text = text.rstrip("0").rstrip(".")
+        if text in {"", "-", "+"}:
+            text += "0"
+        return text.replace(".", ",")
 
 
 Q_GEOMETRY_BUTTON_STYLE = """
@@ -175,6 +235,110 @@ def apply_plot_display_style(ax):
     ax.tick_params(axis="both", labelsize=10)
 
 
+def _figure_axes(ax):
+    return list(getattr(ax.figure, "axes", [ax]))
+
+
+def _plot_lines_for_legend_label(ax, label):
+    matching = []
+    selected_gids = set()
+
+    for target_ax in _figure_axes(ax):
+        for line in target_ax.get_lines():
+            if line.get_label() == label:
+                matching.append(line)
+                gid = line.get_gid()
+                if gid is not None:
+                    selected_gids.add(gid)
+
+    if selected_gids:
+        for target_ax in _figure_axes(ax):
+            for line in target_ax.get_lines():
+                if line.get_gid() in selected_gids and line not in matching:
+                    matching.append(line)
+
+    return matching
+
+
+def _set_legend_selection(ax, selected_label):
+    selected_lines = _plot_lines_for_legend_label(ax, selected_label)
+    selected_ids = {id(line) for line in selected_lines}
+    selected_gids = {line.get_gid() for line in selected_lines if line.get_gid() is not None}
+
+    for target_ax in _figure_axes(ax):
+        for line in target_ax.get_lines():
+            label = line.get_label()
+            if label.startswith("_") and line.get_gid() not in selected_gids:
+                continue
+
+            if "_lrphoton_base_linewidth" not in line.__dict__:
+                line.__dict__["_lrphoton_base_linewidth"] = line.get_linewidth()
+
+            base_width = line.__dict__["_lrphoton_base_linewidth"]
+            is_selected = id(line) in selected_ids or line.get_gid() in selected_gids
+            line.set_linewidth(base_width * 2.4 if is_selected else base_width)
+            line.set_zorder(10 if is_selected else 2)
+
+    legend = ax.get_legend()
+    if legend is not None:
+        for text in legend.get_texts():
+            text.set_fontweight("bold" if text.get_text() == selected_label else "normal")
+        for legend_line, text in zip(legend.get_lines(), legend.get_texts()):
+            legend_line.set_linewidth(2.8 if text.get_text() == selected_label else 1.2)
+
+
+def install_selectable_legend(ax, legend):
+    if legend is None:
+        return None
+
+    legend.__dict__["_lrphoton_axes"] = ax
+    for text in legend.get_texts():
+        text.set_picker(True)
+    for line in legend.get_lines():
+        line.set_picker(True)
+
+    canvas = ax.figure.canvas
+    if not getattr(canvas, "_lrphoton_legend_pick_connected", False):
+        def handle_pick(event):
+            artist = event.artist
+            legend = None
+            if hasattr(artist, "axes") and artist.axes is not None:
+                legend = artist.axes.get_legend()
+
+            if legend is None:
+                for figure_ax in getattr(event.canvas.figure, "axes", []):
+                    candidate = figure_ax.get_legend()
+                    if candidate is not None and artist in (list(candidate.get_texts()) + list(candidate.get_lines())):
+                        legend = candidate
+                        break
+            if legend is None:
+                return
+
+            label = None
+            if artist in legend.get_texts():
+                label = artist.get_text()
+            elif artist in legend.get_lines():
+                lines = list(legend.get_lines())
+                texts = list(legend.get_texts())
+                try:
+                    label = texts[lines.index(artist)].get_text()
+                except (ValueError, IndexError):
+                    label = None
+            if not label:
+                return
+
+            target_ax = legend.__dict__.get("_lrphoton_axes")
+            if target_ax is None:
+                target_ax = legend.axes
+            _set_legend_selection(target_ax, label)
+            event.canvas.draw_idle()
+
+        canvas.mpl_connect("pick_event", handle_pick)
+        canvas._lrphoton_legend_pick_connected = True
+
+    return legend
+
+
 def make_plot_legend(ax):
     legend = ax.legend(
         loc="best",
@@ -186,7 +350,7 @@ def make_plot_legend(ax):
         handletextpad=0.5,
     )
     legend.set_draggable(True)
-    return legend
+    return install_selectable_legend(ax, legend)
 
 
 def finalize_plot_canvas(canvas):

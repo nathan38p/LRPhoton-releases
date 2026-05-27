@@ -7,7 +7,7 @@ import numpy as np
 from PySide6.QtCore import Qt, QEvent, Signal, QTimer
 from PySide6.QtWidgets import (
     QWidget, QFileDialog, QMessageBox, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
-    QPushButton, QDoubleSpinBox, QSpinBox, QTextEdit, QGroupBox, QSlider, QSizePolicy,
+    QPushButton, QSpinBox, QTextEdit, QGroupBox, QSlider, QSizePolicy,
     QLineEdit, QListWidget, QListWidgetItem, QAbstractItemView, QScrollArea, QSplitter,
     QCheckBox,
 )
@@ -24,6 +24,7 @@ from .instrument_presets import (
 from .ui_style import (
     BLOCK_SPACING,
     FILE_BROWSER_WIDTH,
+    FlexibleDoubleSpinBox as QDoubleSpinBox,
     FRAME_BUTTON_WIDTH,
     FRAME_COUNTER_WIDTH,
     FRAME_NAV_SPACING,
@@ -33,6 +34,8 @@ from .ui_style import (
     PAGE_MARGINS,
     PANEL_MARGINS,
     clear_plot_canvas,
+    install_selectable_legend,
+    normalize_decimal_text,
     style_q_geometry_buttons,
 )
 from .file_ratings import install_file_rating_menu, is_file_rated_up, set_item_file_path
@@ -1302,7 +1305,7 @@ class CentreTab(QWidget):
         for name in names:
             if name in header:
                 try:
-                    return float(header[name])
+                    return float(normalize_decimal_text(header[name]))
                 except (TypeError, ValueError):
                     return None
         return None
@@ -1707,7 +1710,7 @@ class CentreTab(QWidget):
             ax.set_ylabel("I(q)")
             ax.set_title(title)
             ax.grid(True, which="both")
-            ax.legend(loc="best")
+            install_selectable_legend(ax, ax.legend(loc="best"))
 
         self.canvas_h.draw_idle()
         self.canvas_v.draw_idle()

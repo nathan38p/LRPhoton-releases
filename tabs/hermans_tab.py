@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QGroupBox,
-    QDoubleSpinBox,
     QSpinBox,
     QTextEdit,
     QGridLayout,
@@ -50,6 +49,7 @@ from .file_ratings import file_path_from_item, install_file_rating_menu, is_file
 from .ui_style import (
     BLOCK_SPACING,
     FILE_BROWSER_WIDTH,
+    FlexibleDoubleSpinBox as QDoubleSpinBox,
     FRAME_BUTTON_WIDTH,
     FRAME_COUNTER_WIDTH,
     FRAME_NAV_SPACING,
@@ -57,7 +57,9 @@ from .ui_style import (
     GROUP_BOX_MARGINS,
     GROUP_BOX_STYLE,
     clear_plot_canvas,
+    install_selectable_legend,
     make_matplotlib_toolbar_block,
+    normalize_decimal_text,
     PAGE_MARGINS,
     PANEL_MARGINS,
     style_q_geometry_buttons,
@@ -267,9 +269,9 @@ def header_float(header, keys, default):
     for key in keys:
         if key in header:
             try:
-                match = re.search(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", str(header[key]))
+                match = re.search(r"[-+]?\d*[\.,]?\d+(?:[eE][-+]?\d+)?", str(header[key]))
                 if match:
-                    return float(match.group(0))
+                    return float(normalize_decimal_text(match.group(0)))
             except Exception:
                 pass
     return default
@@ -975,7 +977,7 @@ class HermansTab(QWidget):
         filters_layout = QGridLayout()
 
         self.extensions_filter = QLineEdit("*azimProf.dat")
-        self.name_filter = QLineEdit("**")
+        self.name_filter = QLineEdit("*cave*")
 
         self.extensions_filter.textChanged.connect(self.refresh_files)
         self.name_filter.textChanged.connect(self.refresh_files)
@@ -1758,11 +1760,19 @@ class HermansTab(QWidget):
         else:
             desired_filter = "*azimProf.dat"
         if self.extensions_filter.text() == desired_filter:
+            if hasattr(self, "name_filter") and self.is_anisotropy_mode() and self.name_filter.text().strip() in {"", "**", "*"}:
+                self.name_filter.blockSignals(True)
+                self.name_filter.setText("*cave*")
+                self.name_filter.blockSignals(False)
             return
 
         self.extensions_filter.blockSignals(True)
         self.extensions_filter.setText(desired_filter)
         self.extensions_filter.blockSignals(False)
+        if hasattr(self, "name_filter"):
+            self.name_filter.blockSignals(True)
+            self.name_filter.setText("*cave*" if self.is_anisotropy_mode() else "**")
+            self.name_filter.blockSignals(False)
 
     def refresh_files(self, *args):
         if not hasattr(self, "folder_path"):
@@ -2646,7 +2656,7 @@ class HermansTab(QWidget):
             self.order_amp_spin,
             amplitude,
             amplitude - 10.0,
-            amplitude + 10.0,
+            max(300.0, amplitude),
         )
 
     def schedule_order_fit(self):
@@ -2872,7 +2882,7 @@ class HermansTab(QWidget):
         ax.set_xlim(0, 360)
         ax.grid(True)
         if self.show_legend_checkbox.isChecked():
-            ax.legend(loc="best")
+            install_selectable_legend(ax, ax.legend(loc="best"))
         self.canvas.draw_idle()
 
     def update_order_plot(self):
@@ -2899,7 +2909,7 @@ class HermansTab(QWidget):
         ax.set_xlim(0, 360)
         ax.grid(True)
         if self.show_legend_checkbox.isChecked():
-            ax.legend(loc="best")
+            install_selectable_legend(ax, ax.legend(loc="best"))
         self.canvas.draw_idle()
 
     def calculate_anisotropy(self, *args):
@@ -3040,7 +3050,7 @@ class HermansTab(QWidget):
                 else:
                     ax.set_xlim(q_min * self.q_display_factor(), q_max * self.q_display_factor())
         ax.grid(True, which="both")
-        ax.legend(loc="best")
+        install_selectable_legend(ax, ax.legend(loc="best"))
         self.canvas.draw_idle()
 
         self.image_canvas.show_image(
@@ -3089,7 +3099,7 @@ class HermansTab(QWidget):
         ax.set_ylabel("Intensity / a.u.")
         ax.set_xlim(0, 360)
         ax.grid(True)
-        ax.legend(loc="best")
+        install_selectable_legend(ax, ax.legend(loc="best"))
         self.canvas.draw_idle()
 
     def update_plot(self, azimuth, intensity, baseline, peak, amplitude, sigma, fwhm, pi, hermans_corr):
@@ -3116,7 +3126,7 @@ class HermansTab(QWidget):
         ax.set_ylabel("Intensity / a.u.")
         ax.set_xlim(0, 360)
         ax.grid(True)
-        ax.legend(loc="best")
+        install_selectable_legend(ax, ax.legend(loc="best"))
         self.canvas.draw_idle()
 
     def update_results_text(self):

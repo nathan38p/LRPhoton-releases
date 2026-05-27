@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QFileDialog,
     QGroupBox,
-    QDoubleSpinBox,
     QSpinBox,
     QTextEdit,
     QCheckBox,
@@ -45,6 +44,7 @@ from .file_ratings import file_path_from_item, install_file_rating_menu, is_file
 from .ui_style import (
     BLOCK_SPACING,
     FILE_BROWSER_WIDTH,
+    FlexibleDoubleSpinBox as QDoubleSpinBox,
     FRAME_BUTTON_WIDTH,
     FRAME_COUNTER_WIDTH,
     FRAME_NAV_SPACING,
@@ -56,6 +56,7 @@ from .ui_style import (
     finalize_plot_canvas,
     make_plot_legend,
     make_matplotlib_toolbar_block,
+    normalize_decimal_text,
     PAGE_MARGINS,
     PANEL_MARGINS,
     style_q_geometry_buttons,
@@ -202,11 +203,14 @@ def read_h5_first_image(filename: str, frame_index: int = 0):
 
         if dataset.ndim == 2:
             image = np.asarray(dataset[...], dtype=np.float64)
+            header["Number of frames"] = "1"
         elif dataset.ndim == 3:
             shape = dataset.shape
             frame_axis = int(np.argmin(shape))
             n_frames = int(shape[frame_axis])
             frame_index = int(np.clip(frame_index, 0, n_frames - 1))
+            header["Frame axis"] = str(frame_axis)
+            header["Number of frames"] = str(n_frames)
 
             if frame_axis == 0:
                 image = np.asarray(dataset[frame_index, :, :], dtype=np.float64)
@@ -236,7 +240,7 @@ def get_header_float(header: dict, *names):
     for name in names:
         if name in header:
             try:
-                return float(header[name])
+                return float(normalize_decimal_text(header[name]))
             except (TypeError, ValueError):
                 return None
     return None
@@ -771,6 +775,8 @@ class AzimuthalTab(QWidget):
         self.current_folder = Path("/Users/nathanpiaget/Documents/Thèse LRP/Expériences/XENOCS")
         self.instrument_mode = "XENOCS"
         self.last_results = {}
+        self.last_result_paths = {}
+        self.last_result_frame_counts = {}
         self._syncing_folder = False
         self.current_frame = 1
         self.total_frames = 1
@@ -847,7 +853,7 @@ class AzimuthalTab(QWidget):
         filters_layout = QGridLayout()
 
         self.extensions_filter = QLineEdit("*.edf *.h5")
-        self.name_filter = QLineEdit("**")
+        self.name_filter = QLineEdit("*cave*")
 
         self.extensions_filter.textChanged.connect(self.refresh_files)
         self.name_filter.textChanged.connect(self.refresh_files)
@@ -1310,6 +1316,8 @@ class AzimuthalTab(QWidget):
         self.set_controls_enabled(bool(selected))
         if not selected:
             self.last_results = {}
+            self.last_result_paths = {}
+            self.last_result_frame_counts = {}
             self.clear_graph_coordinates()
             clear_plot_canvas(self.canvas)
 
@@ -1320,14 +1328,20 @@ class AzimuthalTab(QWidget):
             self.image_canvas.reset_display_limits()
 
         if selected:
+            self.last_results = {}
+            self.last_result_paths = {}
+            self.last_result_frame_counts = {}
+            self.clear_graph_coordinates()
+            clear_plot_canvas(self.canvas)
             current_file = selected[0]
             self.apply_preset_from_file(current_file)
             self.update_frame_controls_from_file(current_file)
             self.display_selected_file_preview(current_file)
-            self.integrate_selected_files()
         else:
             self.update_frame_controls_from_file(None)
             self.last_results = {}
+            self.last_result_paths = {}
+            self.last_result_frame_counts = {}
             self.clear_graph_coordinates()
             self.image_canvas.raw_image = None
             self.image_canvas.set_q_map(None)
@@ -1422,8 +1436,9 @@ class AzimuthalTab(QWidget):
         self.frame_counter_label.setText(f"{value} / {self.total_frames}")
         self.update_frame_navigation_state()
 
-        if self.selected_files():
-            self.integrate_selected_files()
+        selected = self.selected_files()
+        if selected:
+            self.display_selected_file_preview(selected[0])
 
     def previous_frame(self):
         value = max(self.frame_slider.minimum(), self.frame_slider.value() - 1)
@@ -1447,7 +1462,6 @@ class AzimuthalTab(QWidget):
         self.apply_preset_from_file(selected[0] if selected else None)
         if selected:
             self.display_selected_file_preview(selected[0])
-            self.integrate_selected_files()
 
     def open_geometry_dialog(self):
         dialog = QDialog(self)
@@ -1550,7 +1564,6 @@ class AzimuthalTab(QWidget):
         selected = self.selected_files()
         if selected:
             self.display_selected_file_preview(selected[0])
-            self.integrate_selected_files()
 
     def apply_preset_from_file(self, file_path=None):
         header = {}
@@ -1604,6 +1617,8 @@ class AzimuthalTab(QWidget):
         files = self.selected_files()
         if not files:
             self.last_results = {}
+            self.last_result_paths = {}
+            self.last_result_frame_counts = {}
             self.clear_graph_coordinates()
             clear_plot_canvas(self.canvas)
             return
@@ -1615,6 +1630,8 @@ class AzimuthalTab(QWidget):
                 files = [current_file] + [file for file in files if file != current_file]
 
         self.last_results = {}
+        self.last_result_paths = {}
+        self.last_result_frame_counts = {}
         ax = self.canvas.ax
         ax.clear()
         ax.set_axis_on()
@@ -1690,6 +1707,8 @@ class AzimuthalTab(QWidget):
 
                 ax.plot(psi, intensity, linewidth=1.2, label=file_path.stem)
                 self.last_results[file_path.stem] = (psi, intensity, counts)
+                self.last_result_paths[file_path.stem] = file_path
+                self.last_result_frame_counts[file_path.stem] = int(header.get("Number of frames", 1) or 1)
 
                 if file_path == files[0]:
                     self.image_canvas.set_q_map(q_map)
@@ -1794,7 +1813,11 @@ class AzimuthalTab(QWidget):
             range_suffix = "_qfull"
 
         for source_stem, (psi, intensity, counts) in self.last_results.items():
-            out_file = self.current_folder / f"{source_stem}{range_suffix}_azimProf.dat"
+            source_path = self.last_result_paths.get(source_stem)
+            frame_count = self.last_result_frame_counts.get(source_stem, 1)
+            is_h5 = source_path is not None and source_path.suffix.lower() in [".h5", ".hdf5"]
+            frame_suffix = f"_frame{self.current_frame:04d}" if is_h5 and frame_count > 1 else ""
+            out_file = self.current_folder / f"{source_stem}{frame_suffix}{range_suffix}_azimProf.dat"
             data = np.column_stack([psi, intensity, counts])
             with open(out_file, "w", encoding="utf-8") as file:
                 file.write(f"# integration_engine {self.integration_engine.currentText()}\n")

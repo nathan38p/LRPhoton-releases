@@ -25,7 +25,6 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QSlider,
     QCheckBox,
-    QDoubleSpinBox,
     QMessageBox,
     QGroupBox,
     QSpinBox,
@@ -51,6 +50,7 @@ from .file_ratings import install_file_rating_menu, is_file_rated_up, set_item_f
 from .ui_style import (
     BLOCK_SPACING,
     FILE_BROWSER_WIDTH,
+    FlexibleDoubleSpinBox as QDoubleSpinBox,
     FRAME_BUTTON_WIDTH,
     FRAME_COUNTER_WIDTH,
     FRAME_NAV_SPACING,

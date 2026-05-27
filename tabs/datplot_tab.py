@@ -3,7 +3,7 @@ from pathlib import Path
 
 import numpy as np
 
-from PySide6.QtCore import Qt, QEvent, Signal, QMimeData, QTimer
+from PySide6.QtCore import Qt, QEvent, QRectF, Signal, QMimeData, QTimer
 from PySide6.QtWidgets import (
     QWidget,
     QDialog,
@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QGridLayout,
     QLineEdit,
-    QDoubleSpinBox,
     QScrollArea,
     QComboBox,
     QColorDialog,
@@ -38,7 +37,7 @@ from PySide6.QtWidgets import (
     QStyledItemDelegate,
     QStyleOptionViewItem,
 )
-from PySide6.QtGui import QColor, QDrag
+from PySide6.QtGui import QColor, QDrag, QPainter, QPen
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
@@ -48,6 +47,7 @@ from .file_ratings import install_file_rating_menu, is_file_rated_up, set_item_f
 from .ui_style import (
     BLOCK_SPACING,
     FILE_BROWSER_WIDTH,
+    FlexibleDoubleSpinBox as QDoubleSpinBox,
     FRAME_BUTTON_WIDTH,
     FRAME_COUNTER_WIDTH,
     FRAME_NAV_SPACING,
@@ -58,6 +58,7 @@ from .ui_style import (
     apply_plot_display_style,
     clear_plot_canvas,
     finalize_plot_canvas,
+    install_selectable_legend,
     make_matplotlib_toolbar_block,
     make_plot_legend,
 )
@@ -293,6 +294,34 @@ class ColorCellDelegate(QStyledItemDelegate):
         painter.save()
         painter.fillRect(option.rect.adjusted(1, 1, -1, -1), color)
         painter.restore()
+
+
+class EyeToggleButton(QToolButton):
+    """Small visibility toggle drawn as an eye icon."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setFixedSize(22, 20)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setStyleSheet("QToolButton { border: none; background: transparent; padding: 0px; }")
+
+    def paintEvent(self, event):
+        color = QColor("#1f5f9c") if self.isChecked() else QColor("#9ca3af")
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(QPen(color, 1.5))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(QRectF(3.5, 6.0, 15.0, 8.0))
+
+        painter.setBrush(color)
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(QRectF(9.0, 8.0, 4.0, 4.0))
+
+        if not self.isChecked():
+            painter.setPen(QPen(color, 1.8))
+            painter.drawLine(5, 16, 18, 4)
 
 
 # ============================================================
@@ -669,24 +698,48 @@ class DatPlotTab(QWidget):
         curve_box.setMinimumHeight(170)
         curve_panel_layout.addWidget(curve_box, stretch=1)
 
-        self.curve_table = CurveTableWidget(0, 5)
+        self.curve_gradient_colors = ["#1f77b4", "#2ca02c", "#d62728"]
+        gradient_layout = QHBoxLayout()
+        gradient_layout.setContentsMargins(0, 0, 0, 0)
+        gradient_layout.setSpacing(4)
+        gradient_layout.addWidget(QLabel("Gradient:"))
+        self.curve_gradient_buttons = []
+        for index, tooltip in enumerate(["Start color", "Middle color", "End color"]):
+            button = QToolButton()
+            button.setFixedSize(24, 20)
+            button.setToolTip(tooltip)
+            button.clicked.connect(lambda checked=False, color_index=index: self.choose_curve_gradient_color(color_index))
+            self.curve_gradient_buttons.append(button)
+            gradient_layout.addWidget(button)
+        self.apply_curve_gradient_button = QPushButton("Apply")
+        self.apply_curve_gradient_button.setToolTip("Apply this color gradient to the curves in the current list order")
+        self.apply_curve_gradient_button.clicked.connect(self.apply_curve_color_gradient)
+        self.apply_curve_gradient_button.setEnabled(False)
+        gradient_layout.addWidget(self.apply_curve_gradient_button)
+        gradient_layout.addStretch(1)
+        curve_layout.addLayout(gradient_layout)
+        self.update_curve_gradient_buttons()
+
+        self.curve_table = CurveTableWidget(0, 6)
         self.curve_table.setMinimumHeight(140)
-        self.curve_table.setHorizontalHeaderLabels(["File", "Legend", "Axis", "Color", ""])
-        self.curve_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.curve_table.setHorizontalHeaderLabels(["", "File", "Legend", "Axis", "Color", ""])
+        self.curve_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
         self.curve_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.curve_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)
+        self.curve_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.curve_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Fixed)
         self.curve_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Fixed)
-        self.curve_table.setColumnWidth(2, 58)
-        self.curve_table.setColumnWidth(3, 44)
-        self.curve_table.setColumnWidth(4, 30)
+        self.curve_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Fixed)
+        self.curve_table.setColumnWidth(0, 28)
+        self.curve_table.setColumnWidth(3, 58)
+        self.curve_table.setColumnWidth(4, 44)
+        self.curve_table.setColumnWidth(5, 30)
         self.curve_table.verticalHeader().setVisible(False)
         self.curve_table.verticalHeader().setDefaultSectionSize(28)
         self.curve_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.curve_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.curve_table.setDropIndicatorShown(True)
         self.curve_table.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.curve_table.setItemDelegateForColumn(3, ColorCellDelegate(self.curve_table))
+        self.curve_table.setItemDelegateForColumn(4, ColorCellDelegate(self.curve_table))
         self.curve_table.cellChanged.connect(self.curve_table_changed)
         self.curve_table.cellDoubleClicked.connect(self.curve_table_double_clicked)
         self.curve_table.customContextMenuRequested.connect(self.open_curve_table_menu)
@@ -798,6 +851,10 @@ class DatPlotTab(QWidget):
         self.show_legend.setChecked(True)
         self.show_legend.stateChanged.connect(self.update_plot)
 
+        self.keep_zoom_checkbox = QCheckBox("Keep zoom")
+        self.keep_zoom_checkbox.setChecked(False)
+        self.keep_zoom_checkbox.setToolTip("Keep current zoom and pan when the plot is redrawn")
+
         graph_box, self.toolbar_extra_layout, self.save_plot_button = self.create_matplotlib_toolbar_block(
             title="Plot",
             toolbar=self.toolbar,
@@ -805,10 +862,11 @@ class DatPlotTab(QWidget):
                 self.fit_button,
                 self.plot_mode,
                 self.show_legend,
+                self.keep_zoom_checkbox,
             ],
             save_callback=self.save_plot_high_quality,
             save_tooltip="Save plot",
-            toolbar_width=320,
+            toolbar_width=390,
         )
         right_layout.addWidget(graph_box, stretch=0)
         right_layout.addWidget(self.canvas, stretch=1)
@@ -1395,6 +1453,7 @@ class DatPlotTab(QWidget):
                     "y_label": loaded_curve.get("y_label", ""),
                     "manual_dataset": bool(loaded_curve.get("manual_dataset", False)),
                     "color": default_color(index),
+                    "visible": True,
                 }
 
         self.refresh_curve_table()
@@ -1410,7 +1469,7 @@ class DatPlotTab(QWidget):
 
     def update_clear_header_button_position(self):
         header = self.curve_table.horizontalHeader()
-        column = 4
+        column = 5
         x = header.sectionViewportPosition(column)
         width = header.sectionSize(column)
         y = max(0, (header.height() - self.clear_header_button.height()) // 2)
@@ -1428,25 +1487,48 @@ class DatPlotTab(QWidget):
 
         for row, (key, curve) in enumerate(self.curves.items()):
             self.curve_table.insertRow(row)
+            is_visible = curve.get("visible", True)
+            row_color = QColor("#111827") if is_visible else QColor("#8a8f98")
+
+            visibility_item = QTableWidgetItem("")
+            visibility_item.setFlags(visibility_item.flags() & ~Qt.ItemIsEditable)
+            self.curve_table.setItem(row, 0, visibility_item)
+
+            visibility_button = EyeToggleButton(self.curve_table)
+            visibility_button.setChecked(is_visible)
+            visibility_button.setToolTip("Hide this curve" if is_visible else "Show this curve")
+            visibility_button.toggled.connect(
+                lambda visible, curve_key=key: self.set_curve_visible(curve_key, visible)
+            )
+
+            visibility_holder = QWidget()
+            visibility_layout = QHBoxLayout(visibility_holder)
+            visibility_layout.setContentsMargins(0, 0, 0, 0)
+            visibility_layout.setSpacing(0)
+            visibility_layout.addWidget(visibility_button, alignment=Qt.AlignCenter)
+            self.curve_table.setCellWidget(row, 0, visibility_holder)
 
             file_item = QTableWidgetItem(key)
             file_item.setFlags(file_item.flags() & ~Qt.ItemIsEditable)
             file_item.setToolTip(str(curve["path"].name))
-            self.curve_table.setItem(row, 0, file_item)
+            file_item.setForeground(row_color)
+            self.curve_table.setItem(row, 1, file_item)
 
             legend_item = QTableWidgetItem(curve["legend"])
             legend_item.setToolTip(str(curve["path"].name))
-            self.curve_table.setItem(row, 1, legend_item)
+            legend_item.setForeground(row_color)
+            self.curve_table.setItem(row, 2, legend_item)
 
             axis_item = QTableWidgetItem(normalize_plot_axis(curve.get("axis", "left")))
             axis_item.setToolTip("Use left, left2, right or right2 for the Y axis")
-            self.curve_table.setItem(row, 2, axis_item)
+            axis_item.setForeground(row_color)
+            self.curve_table.setItem(row, 3, axis_item)
 
             color_item = QTableWidgetItem("")
             color_item.setFlags(color_item.flags() & ~Qt.ItemIsEditable)
             color_item.setBackground(QColor(curve["color"]))
             color_item.setToolTip(curve["color"])
-            self.curve_table.setItem(row, 3, color_item)
+            self.curve_table.setItem(row, 4, color_item)
 
             remove_button = QPushButton("−")
             remove_button.setFixedSize(22, 18)
@@ -1472,7 +1554,7 @@ class DatPlotTab(QWidget):
             remove_layout.setContentsMargins(0, 0, 0, 0)
             remove_layout.setSpacing(0)
             remove_layout.addWidget(remove_button, alignment=Qt.AlignCenter)
-            self.curve_table.setCellWidget(row, 4, remove_holder)
+            self.curve_table.setCellWidget(row, 5, remove_holder)
 
         self.curve_table.blockSignals(False)
         self._refreshing_curve_table = False
@@ -1480,7 +1562,7 @@ class DatPlotTab(QWidget):
     def curve_table_changed(self, row, column):
         if self._refreshing_curve_table:
             return
-        file_item = self.curve_table.item(row, 0)
+        file_item = self.curve_table.item(row, 1)
         if file_item is None:
             return
 
@@ -1488,20 +1570,20 @@ class DatPlotTab(QWidget):
         if key not in self.curves:
             return
 
-        if column == 1:
+        if column == 2:
             item = self.curve_table.item(row, column)
             self.curves[key]["legend"] = item.text() if item else self.curves[key]["legend"]
             self.remember_legend_for_file(self.curves[key]["path"], self.curves[key]["legend"])
             self.update_plot()
             return
-        if column == 2:
+        if column == 3:
             item = self.curve_table.item(row, column)
             axis = item.text() if item else "left"
             self.curves[key]["axis"] = normalize_plot_axis(axis)
             self.refresh_curve_table()
             self.update_plot()
             return
-        elif column == 3:
+        elif column == 4:
             item = self.curve_table.item(row, column)
             if item:
                 self.curves[key]["color"] = item.text()
@@ -1529,7 +1611,7 @@ class DatPlotTab(QWidget):
         if legend is not None:
             legend.remove()
 
-        if self.show_legend.isChecked() and self.curves:
+        if self.show_legend.isChecked() and self.visible_curves():
             make_plot_legend(ax)
 
         ax.set_xscale(previous_xscale)
@@ -1555,7 +1637,7 @@ class DatPlotTab(QWidget):
         legend = ax.get_legend()
         if legend is not None:
             legend.remove()
-        if self.show_legend.isChecked() and self.curves:
+        if self.show_legend.isChecked() and self.visible_curves():
             make_plot_legend(ax)
 
         ax.set_xscale(previous_xscale)
@@ -1564,9 +1646,78 @@ class DatPlotTab(QWidget):
         ax.set_ylim(previous_ylim)
         finalize_plot_canvas(self.canvas)
 
+    def update_curve_gradient_buttons(self):
+        for button, color in zip(getattr(self, "curve_gradient_buttons", []), self.curve_gradient_colors):
+            button.setStyleSheet(f"""
+                QToolButton {{
+                    background: {color};
+                    border: 1px solid #9ca3af;
+                    border-radius: 6px;
+                    padding: 0px;
+                }}
+                QToolButton:hover {{
+                    border: 1px solid #111827;
+                }}
+            """)
+
+    def choose_curve_gradient_color(self, color_index):
+        if not 0 <= color_index < len(self.curve_gradient_colors):
+            return
+
+        color = QColorDialog.getColor(
+            QColor(self.curve_gradient_colors[color_index]),
+            self,
+            "Choose gradient color",
+        )
+        if not color.isValid():
+            return
+
+        self.curve_gradient_colors[color_index] = color.name()
+        self.update_curve_gradient_buttons()
+
+    def curve_gradient_color_at(self, position):
+        start = QColor(self.curve_gradient_colors[0])
+        middle = QColor(self.curve_gradient_colors[1])
+        end = QColor(self.curve_gradient_colors[2])
+
+        if position <= 0.5:
+            left, right = start, middle
+            local_position = position / 0.5 if position > 0 else 0.0
+        else:
+            left, right = middle, end
+            local_position = (position - 0.5) / 0.5
+
+        red = round(left.red() + (right.red() - left.red()) * local_position)
+        green = round(left.green() + (right.green() - left.green()) * local_position)
+        blue = round(left.blue() + (right.blue() - left.blue()) * local_position)
+        return QColor(red, green, blue).name()
+
+    def apply_curve_color_gradient(self):
+        if not self.curves:
+            return
+
+        curve_count = len(self.curves)
+        for index, curve in enumerate(self.curves.values()):
+            position = 0.5 if curve_count == 1 else index / (curve_count - 1)
+            curve["color"] = self.curve_gradient_color_at(position)
+
+        self.refresh_curve_table()
+        self.update_plot()
+
+    def visible_curves(self):
+        return {
+            key: curve
+            for key, curve in self.curves.items()
+            if curve.get("visible", True)
+        }
+
     def open_power_law_fit_dialog(self):
         if not self.curves:
             QMessageBox.warning(self, "No curves", "Load at least one I(q) curve before fitting.")
+            return
+        visible_curves = self.visible_curves()
+        if not visible_curves:
+            QMessageBox.warning(self, "No visible curves", "Show at least one I(q) curve before fitting.")
             return
         if self.curves_are_really_0_to_360():
             QMessageBox.warning(self, "Not an I(q) plot", "Power-law fitting is only available for I(q) curves.")
@@ -1594,7 +1745,7 @@ class DatPlotTab(QWidget):
         fit_row.setSpacing(8)
 
         curve_combo = QComboBox()
-        for key, curve in self.curves.items():
+        for key, curve in visible_curves.items():
             curve_combo.addItem(curve["legend"], key)
 
         exponent_combo = QComboBox()
@@ -1670,7 +1821,7 @@ class DatPlotTab(QWidget):
             fit_ax.clear()
             mode = self.plot_mode.currentText()
 
-            for curve in self.curves.values():
+            for curve in visible_curves.values():
                 x = np.asarray(self.make_plot_x(curve["x"]), dtype=float)
                 y = np.asarray(curve["y"], dtype=float)
                 valid = np.isfinite(x) & np.isfinite(y)
@@ -1702,7 +1853,7 @@ class DatPlotTab(QWidget):
             fit_ax.set_xlabel(self.q_axis_label())
             fit_ax.set_ylabel("Intensity / a.u.")
             fit_ax.grid(True, which="both")
-            fit_ax.legend(loc="best")
+            install_selectable_legend(fit_ax, fit_ax.legend(loc="best"))
 
             x0, x1 = self.canvas.ax.get_xlim()
             y0, y1 = self.canvas.ax.get_ylim()
@@ -2113,7 +2264,7 @@ class DatPlotTab(QWidget):
         
         # Iterate through all rows in the table and preserve their order
         for table_row in range(self.curve_table.rowCount()):
-            file_item = self.curve_table.item(table_row, 0)
+            file_item = self.curve_table.item(table_row, 1)
             
             # Skip if item is None
             if file_item is None:
@@ -2135,10 +2286,10 @@ class DatPlotTab(QWidget):
         self.update_plot()
 
     def curve_table_double_clicked(self, row, column):
-        if column != 3:
+        if column != 4:
             return
 
-        file_item = self.curve_table.item(row, 0)
+        file_item = self.curve_table.item(row, 1)
         if file_item is None:
             return
 
@@ -2160,6 +2311,14 @@ class DatPlotTab(QWidget):
         self.refresh_curve_table()
         self.update_plot()
 
+    def set_curve_visible(self, key, visible):
+        if key not in self.curves:
+            return
+
+        self.curves[key]["visible"] = bool(visible)
+        self.refresh_curve_table()
+        self.update_plot()
+
     def clear_curves(self):
         self.curves.clear()
         self.refresh_curve_table()
@@ -2170,7 +2329,7 @@ class DatPlotTab(QWidget):
     def selected_curve_keys(self):
         keys = []
         for index in self.curve_table.selectionModel().selectedRows():
-            item = self.curve_table.item(index.row(), 0)
+            item = self.curve_table.item(index.row(), 1)
             if item is not None and item.text() in self.curves:
                 keys.append(item.text())
         return keys
@@ -2181,7 +2340,7 @@ class DatPlotTab(QWidget):
             return
 
         row = item.row()
-        key_item = self.curve_table.item(row, 0)
+        key_item = self.curve_table.item(row, 1)
         if key_item is None:
             return
 
@@ -2313,7 +2472,7 @@ class DatPlotTab(QWidget):
         best_key = None
         best_distance = float("inf")
 
-        for key, curve in self.curves.items():
+        for key, curve in self.visible_curves().items():
             x = np.asarray(self.make_plot_x(curve["x"]), dtype=float)
             y = np.asarray(self.make_plot_y(curve["x"], curve["y"]), dtype=float)
             valid = np.isfinite(x) & np.isfinite(y)
@@ -2448,7 +2607,9 @@ class DatPlotTab(QWidget):
             getattr(self, "plot_mode", None),
             getattr(self, "fit_button", None),
             getattr(self, "show_legend", None),
+            getattr(self, "keep_zoom_checkbox", None),
             getattr(self, "save_plot_button", None),
+            getattr(self, "apply_curve_gradient_button", None),
             getattr(self, "mask_range_button", None),
             getattr(self, "reset_masks_button", None),
             getattr(self, "add_axis_label_button", None),
@@ -2517,13 +2678,14 @@ class DatPlotTab(QWidget):
         self.graph_coordinate_label.setText(f"{x_name} = - | {y_name} = -")
 
     def curves_are_really_0_to_360(self):
-        if not self.curves:
+        curves = self.visible_curves()
+        if not curves:
             return False
 
-        if any("azimprof" in curve["path"].name.lower() for curve in self.curves.values()):
+        if any("azimprof" in curve["path"].name.lower() for curve in curves.values()):
             return True
 
-        for curve in self.curves.values():
+        for curve in curves.values():
             x = curve["x"]
             valid = x[np.isfinite(x)]
             if valid.size == 0:
@@ -2537,7 +2699,10 @@ class DatPlotTab(QWidget):
         return True
 
     def apply_default_plot_mode(self):
-        has_manual_dataset = any(curve.get("manual_dataset", False) for curve in self.curves.values())
+        curves = self.visible_curves()
+        if not curves:
+            return
+        has_manual_dataset = any(curve.get("manual_dataset", False) for curve in curves.values())
         mode = "linear linear" if has_manual_dataset or self.curves_are_really_0_to_360() else "log log"
 
         if self.plot_mode.currentText() == mode:
@@ -2559,13 +2724,14 @@ class DatPlotTab(QWidget):
         self.update_plot()
 
     def update_limit_fields_from_current_data(self):
-        if not self.curves:
+        curves = self.visible_curves()
+        if not curves:
             return
 
         all_x = []
         all_y = []
 
-        for curve in self.curves.values():
+        for curve in curves.values():
             x = self.make_plot_x(curve["x"])
             y = self.make_plot_y(curve["x"], curve["y"])
 
@@ -2616,6 +2782,14 @@ class DatPlotTab(QWidget):
 
     def update_plot(self):
         ax = self.canvas.ax
+        keep_zoom = (
+            getattr(self, "keep_zoom_checkbox", None) is not None
+            and self.keep_zoom_checkbox.isChecked()
+            and ax.has_data()
+        )
+        previous_xlim = ax.get_xlim() if keep_zoom else None
+        previous_ylim = ax.get_ylim() if keep_zoom else None
+
         for extra_ax in getattr(self, "extra_axes", {}).values():
             extra_ax.remove()
         self.extra_axes = {}
@@ -2629,12 +2803,13 @@ class DatPlotTab(QWidget):
 
         ax.set_axis_on()
         self.update_graph_toolbar_enabled()
+        visible_curves = self.visible_curves()
 
         mode = self.plot_mode.currentText()
         if self.auto_limits.isChecked():
             self.update_limit_fields_from_current_data()
 
-        used_axes = {normalize_plot_axis(curve.get("axis", "left")) for curve in self.curves.values()}
+        used_axes = {normalize_plot_axis(curve.get("axis", "left")) for curve in visible_curves.values()}
         axis_map = {"left": ax}
         if "right" in used_axes:
             axis_map["right"] = ax.twinx()
@@ -2650,7 +2825,7 @@ class DatPlotTab(QWidget):
             axis_map["right2"].spines["right"].set_position(("axes", 1.12))
         self.extra_axes = {name: axis for name, axis in axis_map.items() if name != "left"}
 
-        for key, curve in self.curves.items():
+        for key, curve in visible_curves.items():
             target_ax = axis_map.get(normalize_plot_axis(curve.get("axis", "left")), ax)
             x = self.make_plot_x(curve["x"])
             y = self.make_plot_y(curve["x"], curve["y"])
@@ -2685,7 +2860,7 @@ class DatPlotTab(QWidget):
         else:
             curve_x_labels = [
                 str(curve.get("x_label", "")).strip()
-                for curve in self.curves.values()
+                for curve in visible_curves.values()
                 if str(curve.get("x_label", "")).strip()
             ]
             default_x_label = curve_x_labels[0] if curve_x_labels else self.q_axis_label()
@@ -2696,7 +2871,7 @@ class DatPlotTab(QWidget):
         for axis_name in PLOT_Y_AXES:
             labels = [
                 str(curve.get("y_label", "")).strip()
-                for curve in self.curves.values()
+                for curve in visible_curves.values()
                 if normalize_plot_axis(curve.get("axis", "left")) == axis_name and str(curve.get("y_label", "")).strip()
             ]
             if labels:
@@ -2714,7 +2889,7 @@ class DatPlotTab(QWidget):
             apply_plot_display_style(target_ax)
             if axis_name != "left":
                 target_ax.grid(False)
-        if self.show_legend.isChecked():
+        if self.show_legend.isChecked() and visible_curves:
             if len(axis_map) == 1:
                 make_plot_legend(ax)
             else:
@@ -2724,13 +2899,18 @@ class DatPlotTab(QWidget):
                     axis_handles, axis_labels_for_legend = target_ax.get_legend_handles_labels()
                     handles.extend(axis_handles)
                     labels.extend(axis_labels_for_legend)
-                ax.legend(handles, labels, loc="best", frameon=True)
+                install_selectable_legend(ax, ax.legend(handles, labels, loc="best", frameon=True))
 
         if not self.auto_limits.isChecked():
             if self.x_max.value() > self.x_min.value():
                 ax.set_xlim(self.x_min.value(), self.x_max.value())
             if self.y_max.value() > self.y_min.value():
                 ax.set_ylim(self.y_min.value(), self.y_max.value())
+
+        if keep_zoom and previous_xlim is not None and previous_ylim is not None:
+            if np.isfinite(previous_xlim).all() and np.isfinite(previous_ylim).all():
+                ax.set_xlim(previous_xlim)
+                ax.set_ylim(previous_ylim)
 
         if "left2" in axis_map:
             self.canvas.fig.subplots_adjust(left=0.20)

@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QFileDialog,
     QGroupBox,
-    QDoubleSpinBox,
     QSpinBox,
     QTextEdit,
     QCheckBox,
@@ -33,6 +32,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QSizePolicy,
     QSplitter,
+    QStyle,
 )
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
@@ -54,6 +54,7 @@ from .ui_style import (
     BLOCK_SPACING,
     COMPACT_COMBO_STYLE,
     FILE_BROWSER_WIDTH,
+    FlexibleDoubleSpinBox as QDoubleSpinBox,
     FRAME_BUTTON_WIDTH,
     FRAME_COUNTER_WIDTH,
     FRAME_NAV_SPACING,
@@ -63,6 +64,7 @@ from .ui_style import (
     PAGE_MARGINS,
     PANEL_MARGINS,
     make_matplotlib_toolbar_block,
+    normalize_decimal_text,
     style_q_geometry_buttons,
 )
 from .file_ratings import install_file_rating_menu, is_file_rated_up, set_item_file_path
@@ -346,7 +348,7 @@ def get_header_float(header: dict, *names):
     for name in names:
         if name in header:
             try:
-                return float(header[name])
+                return float(normalize_decimal_text(header[name]))
             except (TypeError, ValueError):
                 return None
     return None
@@ -2322,6 +2324,7 @@ class CaveTab(QWidget):
         self.run_button.clicked.connect(self.run_cave)
 
         self.save_button = QPushButton("Save Cave")
+        self.save_button.setIcon(self.style().standardIcon(QStyle.SP_DialogSaveButton))
         self.save_button.setFixedHeight(cave_action_button_height)
         self.save_button.setStyleSheet(cave_action_button_style)
         self.save_button.clicked.connect(self.save_cave)
@@ -3265,19 +3268,7 @@ class CaveTab(QWidget):
             return
 
         if self.file_type == "EDF":
-            suggested_path = self.current_file.parent / f"{self.current_file.stem}_cave.edf"
-            output_path, _ = QFileDialog.getSaveFileName(
-                self,
-                "Save cave EDF",
-                str(suggested_path),
-                "EDF (*.edf);;All files (*)",
-            )
-
-            if not output_path:
-                return
-
-            if not output_path.lower().endswith(".edf"):
-                output_path += ".edf"
+            output_path = self.current_file.parent / f"{self.current_file.stem}_cave.edf"
 
             try:
                 write_edf_file(output_path, sanitize_cave_output_image(self.image_filled), self.raw_header_text, self.byte_order)
@@ -3287,19 +3278,7 @@ class CaveTab(QWidget):
 
         else:
             frame_suffix = f"_frame{self.frame_spin.value():04d}" if self.h5_n_frames > 1 else ""
-            suggested_path = self.current_file.parent / f"{self.current_file.stem}{frame_suffix}_cave.h5"
-            output_path, _ = QFileDialog.getSaveFileName(
-                self,
-                "Save cave H5",
-                str(suggested_path),
-                "HDF5 (*.h5);;All files (*)",
-            )
-
-            if not output_path:
-                return
-
-            if not output_path.lower().endswith((".h5", ".hdf5")):
-                output_path += ".h5"
+            output_path = self.current_file.parent / f"{self.current_file.stem}{frame_suffix}_cave.h5"
 
             try:
                 write_h5_frame_file(

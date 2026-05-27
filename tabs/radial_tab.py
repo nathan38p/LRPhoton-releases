@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QFileDialog,
     QGroupBox,
-    QDoubleSpinBox,
     QSpinBox,
     QTextEdit,
     QCheckBox,
@@ -46,6 +45,7 @@ from .file_ratings import file_path_from_item, install_file_rating_menu, is_file
 from .ui_style import (
     BLOCK_SPACING,
     FILE_BROWSER_WIDTH,
+    FlexibleDoubleSpinBox as QDoubleSpinBox,
     FRAME_BUTTON_WIDTH,
     FRAME_COUNTER_WIDTH,
     FRAME_NAV_SPACING,
@@ -55,8 +55,10 @@ from .ui_style import (
     apply_plot_display_style,
     clear_plot_canvas,
     finalize_plot_canvas,
+    install_selectable_legend,
     make_plot_legend,
     make_matplotlib_toolbar_block,
+    normalize_decimal_text,
     PAGE_MARGINS,
     PANEL_MARGINS,
     style_q_geometry_buttons,
@@ -275,7 +277,7 @@ def get_header_float(header: dict, *names):
     for name in names:
         if name in header:
             try:
-                return float(header[name])
+                return float(normalize_decimal_text(header[name]))
             except (TypeError, ValueError):
                 return None
     return None
@@ -1436,6 +1438,8 @@ class RadialTab(QWidget):
         self.current_files = []
         self.instrument_mode = "XENOCS"
         self.last_results = {}
+        self.last_result_paths = {}
+        self.last_result_frame_counts = {}
         self.last_comparison_results = {}
         self.h5_dataset_name = None
         self.h5_frame_axis = None
@@ -1603,7 +1607,7 @@ class RadialTab(QWidget):
         filters_layout = QGridLayout()
 
         self.extensions_filter = QLineEdit("*.edf *.h5")
-        self.name_filter = QLineEdit("**")
+        self.name_filter = QLineEdit("*cave*")
 
         self.extensions_filter.textChanged.connect(self.refresh_files)
         self.name_filter.textChanged.connect(self.refresh_files)
@@ -1637,6 +1641,7 @@ class RadialTab(QWidget):
         install_file_rating_menu(self.file_list)
         self.file_list.setSelectionMode(QListWidget.ExtendedSelection)
         self.file_list.itemSelectionChanged.connect(self.selection_changed)
+        self.file_list.currentItemChanged.connect(lambda current, previous: self.selection_changed())
         self.file_list.setMinimumHeight(180)
 
         file_layout.addWidget(self.file_list, stretch=1)
@@ -2144,6 +2149,8 @@ class RadialTab(QWidget):
         self.set_controls_enabled(bool(selected))
         if not selected:
             self.last_results = {}
+            self.last_result_paths = {}
+            self.last_result_frame_counts = {}
             self.clear_graph_coordinates()
             clear_plot_canvas(self.canvas)
 
@@ -2158,6 +2165,12 @@ class RadialTab(QWidget):
         self.h5_n_frames = 1
 
         if selected:
+            self.last_results = {}
+            self.last_result_paths = {}
+            self.last_result_frame_counts = {}
+            self.last_comparison_results = {}
+            self.clear_graph_coordinates()
+            clear_plot_canvas(self.canvas)
             first_file = selected[0]
             if first_file.suffix.lower() in [".h5", ".hdf5"]:
                 try:
@@ -2180,6 +2193,8 @@ class RadialTab(QWidget):
             self.configure_frame_navigation(1)
             self.update_frame_selector_visibility()
             self.last_results = {}
+            self.last_result_paths = {}
+            self.last_result_frame_counts = {}
             self.clear_graph_coordinates()
             self.image_canvas.raw_image = None
             self.image_canvas.set_q_map(None)
@@ -2188,7 +2203,13 @@ class RadialTab(QWidget):
             clear_plot_canvas(self.image_canvas)
 
     def selected_files(self):
-        return [file_path_from_item(item, self.current_folder) for item in self.file_list.selectedItems()]
+        selected_items = list(self.file_list.selectedItems())
+        current_item = self.file_list.currentItem()
+        if current_item is not None and current_item in selected_items:
+            ordered_items = [current_item] + [item for item in selected_items if item is not current_item]
+        else:
+            ordered_items = selected_items
+        return [file_path_from_item(item, self.current_folder) for item in ordered_items]
 
     def set_instrument_mode(self, mode):
         self.instrument_mode = mode
@@ -2381,6 +2402,8 @@ class RadialTab(QWidget):
         files = self.selected_files()
         if not files:
             self.last_results = {}
+            self.last_result_paths = {}
+            self.last_result_frame_counts = {}
             self.clear_graph_coordinates()
             clear_plot_canvas(self.canvas)
             return
@@ -2395,15 +2418,16 @@ class RadialTab(QWidget):
         previous_yscale = ax.get_yscale() if preserve_view else None
 
         self.last_results = {}
+        self.last_result_paths = {}
+        self.last_result_frame_counts = {}
         self.last_comparison_results = {}
         ax.clear()
 
         messages = []
         for file_path in files:
             try:
-                h5_dataset_name = self.h5_dataset_name if file_path.suffix.lower() in [".h5", ".hdf5"] else None
                 h5_frame_index = self.frame_spin.value() - 1 if file_path.suffix.lower() in [".h5", ".hdf5"] else 0
-                image, header = read_image_file(file_path, h5_dataset_name, h5_frame_index)
+                image, header = read_image_file(file_path, None, h5_frame_index)
                 q_min = 0
                 q_max = 0
                 sector_min = self.sector_min.value() if self.use_sector.isChecked() else 0
@@ -2500,6 +2524,8 @@ class RadialTab(QWidget):
                 x, y = self.make_plot_arrays(q, intensity)
                 line, = ax.plot(x, y, linewidth=1.2, label=file_path.stem)
                 self.last_results[file_path.stem] = (q, intensity, counts)
+                self.last_result_paths[file_path.stem] = file_path
+                self.last_result_frame_counts[file_path.stem] = int(header.get("Number of frames", 1) or 1)
 
                 comparison_message = None
                 if False:
@@ -2863,7 +2889,7 @@ class RadialTab(QWidget):
                 else "Intensity / a.u."
             )
             fit_ax.grid(True, which="both")
-            fit_ax.legend(loc="best")
+            install_selectable_legend(fit_ax, fit_ax.legend(loc="best"))
             fit_ax.set_xlim(self.canvas.ax.get_xlim())
             fit_ax.set_ylim(self.canvas.ax.get_ylim())
             fig.tight_layout()
@@ -3009,7 +3035,10 @@ class RadialTab(QWidget):
         range_suffix = "_" + "_".join(range_parts)
 
         for source_stem, (q, intensity, counts) in self.last_results.items():
-            frame_suffix = f"_frame{self.frame_spin.value():04d}" if self.h5_n_frames > 1 else ""
+            source_path = self.last_result_paths.get(source_stem)
+            frame_count = self.last_result_frame_counts.get(source_stem, 1)
+            is_h5 = source_path is not None and source_path.suffix.lower() in [".h5", ".hdf5"]
+            frame_suffix = f"_frame{self.frame_spin.value():04d}" if is_h5 and frame_count > 1 else ""
             out_file = self.current_folder / f"{source_stem}{frame_suffix}{range_suffix}_azimAvg.dat"
             scaled_intensity = intensity * self.intensity_scale.value()
             data = np.column_stack([q, scaled_intensity, counts])

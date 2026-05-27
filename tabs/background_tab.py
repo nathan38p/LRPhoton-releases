@@ -9,7 +9,6 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QLineEdit,
     QCheckBox,
-    QDoubleSpinBox,
     QSpinBox,
     QTextEdit,
     QSlider,
@@ -45,6 +44,7 @@ try:
         PANEL_MARGINS,
         BLOCK_SPACING,
         FILE_BROWSER_WIDTH,
+        FlexibleDoubleSpinBox as QDoubleSpinBox,
         FRAME_BUTTON_WIDTH,
         FRAME_COUNTER_WIDTH,
         FRAME_NAV_SPACING,
@@ -53,6 +53,8 @@ try:
         TOOL_GROUP_BOX_STYLE,
     )
 except Exception:
+    from PySide6.QtWidgets import QDoubleSpinBox
+
     PAGE_MARGINS = (4, 4, 4, 4)
     PANEL_MARGINS = (0, 0, 0, 0)
     BLOCK_SPACING = 8

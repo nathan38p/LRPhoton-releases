@@ -1,19 +1,19 @@
 import numpy as np
 
 from PySide6.QtWidgets import (
-    QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QVBoxLayout,
     QWidget,
     QPushButton,
+    QMessageBox,
 )
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
-from .ui_style import style_q_geometry_buttons
+from .ui_style import FlexibleDoubleSpinBox as QDoubleSpinBox, style_q_geometry_buttons
 from .view_tab import ViewTab
 
 
@@ -41,6 +41,8 @@ class UnfoldTab(ViewTab):
             self.save_colorbar_checkbox.setVisible(True)
             self.save_colorbar_checkbox.setStyleSheet("")
         self.unfold_save_button = getattr(self, "save_image_button", None)
+        if self.unfold_save_button is not None:
+            self.unfold_save_button.setToolTip("Save unfolded image")
 
     def _configure_unfold_right_panel(self):
         self.info_box.setTitle("Parameters")
@@ -248,6 +250,34 @@ class UnfoldTab(ViewTab):
         self.ax.set_autoscale_on(False)
         self.canvas.draw_idle()
         self.update_pattern_preview()
+
+    def current_raw_image_for_save(self):
+        if self.raw_current_img is None:
+            raise ValueError("No unfolded image data is available.")
+        return np.asarray(self.raw_current_img, dtype=float)
+
+    def automatic_unfold_save_path(self):
+        frame_suffix = ""
+        total_frames = self.n_frames if self.is_lazy_h5 else (self.images.shape[0] if self.images is not None else 1)
+        if total_frames > 1:
+            frame_suffix = f"_frame{self.current_index + 1:04d}"
+
+        suffix = ".edf" if self.current_file.suffix.lower() == ".edf" else ".h5"
+        return self.current_file.parent / f"{self.current_file.stem}{frame_suffix}_unfold{suffix}"
+
+    def save_png_image_only(self):
+        if self.raw_current_img is None or self.current_file is None:
+            QMessageBox.information(self, "No image", "No unfolded image is currently loaded.")
+            return
+
+        output_path = self.automatic_unfold_save_path()
+        try:
+            if output_path.suffix.lower() == ".edf":
+                self.save_current_frame_as_edf(output_path)
+            else:
+                self.save_current_frame_as_h5(output_path)
+        except Exception as error:
+            QMessageBox.critical(self, "Save error", f"Unable to save unfolded image:\n{error}")
 
     def _apply_unfold_figure_margins(self):
         self.fig.subplots_adjust(left=0.13, right=0.90, top=0.98, bottom=0.14)
