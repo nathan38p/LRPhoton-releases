@@ -1,4 +1,5 @@
 import fnmatch
+import json
 from pathlib import Path
 
 import h5py
@@ -33,6 +34,8 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QSizePolicy,
     QToolButton,
+    QTreeWidget,
+    QTreeWidgetItem,
 )
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
@@ -65,6 +68,9 @@ from .ui_style import (
     make_matplotlib_toolbar_block,
     style_q_geometry_buttons,
 )
+
+
+ANNOTATIONS_FILE = Path.home() / ".lrphoton" / "annotations.json"
 
 
 class ImageOnlyToolbar(NavigationToolbar):
@@ -282,6 +288,8 @@ class PlaneAnnotationCanvas(FigureCanvas):
         self.dialog.update_coordinate_label(point)
 
     def on_release(self, event):
+        if self._drag_label is not None:
+            self.dialog.save_annotations()
         self._drag_label = None
 
     def on_leave(self, event):
@@ -289,41 +297,47 @@ class PlaneAnnotationCanvas(FigureCanvas):
 
 
 class PlaneAnnotationDialog(QDialog):
-    def __init__(self, parent, raw_image, display_image, vmin, vmax, q_calculator, title):
+    def __init__(self, parent, raw_image, display_image, vmin, vmax, q_calculator, title, annotation_key):
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.resize(950, 720)
+        self.resize(1120, 720)
         self.raw_image = np.asarray(raw_image, dtype=float)
         self.display_image = np.asarray(display_image, dtype=float)
         self.vmin = vmin
         self.vmax = vmax
         self.q_calculator = q_calculator
+        self.annotation_key = annotation_key
         self.annotations = {}
+        self.current_plane = "plane 1"
+        self._syncing_tree = False
 
-        layout = QVBoxLayout(self)
+        layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(6)
+
+        image_panel = QWidget()
+        image_layout = QVBoxLayout(image_panel)
+        image_layout.setContentsMargins(0, 0, 0, 0)
+        image_layout.setSpacing(6)
 
         controls = QHBoxLayout()
         controls.setContentsMargins(0, 0, 0, 0)
         controls.setSpacing(6)
-        controls.addWidget(QLabel("Plane:"))
-        self.label_edit = QLineEdit("plane 1")
-        controls.addWidget(self.label_edit, 1)
         self.undo_button = QPushButton("Undo point")
         self.clear_button = QPushButton("Clear")
         self.save_button = QPushButton("Save PNG")
+        controls.addStretch(1)
         controls.addWidget(self.undo_button)
         controls.addWidget(self.clear_button)
         controls.addWidget(self.save_button)
-        layout.addLayout(controls)
+        image_layout.addLayout(controls)
 
         self.canvas = PlaneAnnotationCanvas(self)
         toolbar = NavigationToolbar(self.canvas, self)
         toolbar_box, _, _ = make_matplotlib_toolbar_block(self, "", toolbar, toolbar_width=300)
         toolbar_box.setFixedHeight(48)
-        layout.addWidget(toolbar_box, 0)
-        layout.addWidget(self.canvas, 1)
+        image_layout.addWidget(toolbar_box, 0)
+        image_layout.addWidget(self.canvas, 1)
 
         self.coordinate_label = QLabel("x = - | y = - | q = - | I = -")
         self.coordinate_label.setMinimumHeight(28)
@@ -337,23 +351,189 @@ class PlaneAnnotationDialog(QDialog):
                 font-size: 11px;
             }
         """)
-        layout.addWidget(self.coordinate_label, 0)
+        image_layout.addWidget(self.coordinate_label, 0)
+
+        side_panel = QGroupBox("Planes")
+        side_panel.setStyleSheet(GROUP_BOX_STYLE)
+        side_panel.setFixedWidth(260)
+        side_layout = QVBoxLayout(side_panel)
+        side_layout.setContentsMargins(*GROUP_BOX_MARGINS)
+        side_layout.setSpacing(6)
+
+        self.label_edit = QLineEdit(self.current_plane)
+        self.add_plane_button = QPushButton("Add plane")
+        side_layout.addWidget(QLabel("Current plane"))
+        side_layout.addWidget(self.label_edit)
+        side_layout.addWidget(self.add_plane_button)
+
+        self.plane_tree = QTreeWidget()
+        self.plane_tree.setHeaderHidden(True)
+        self.plane_tree.setMinimumHeight(240)
+        self.plane_tree.setSelectionMode(QTreeWidget.SingleSelection)
+        side_layout.addWidget(self.plane_tree, 1)
+
+        layout.addWidget(image_panel, 1)
+        layout.addWidget(side_panel, 0)
 
         self.undo_button.clicked.connect(self.undo_last_point)
         self.clear_button.clicked.connect(self.clear_annotations)
         self.save_button.clicked.connect(self.save_png)
+        self.add_plane_button.clicked.connect(self.add_plane)
+        self.label_edit.editingFinished.connect(self.rename_current_plane)
+        self.plane_tree.currentItemChanged.connect(self.tree_selection_changed)
+        self.load_annotations()
+        self.ensure_plane(self.current_plane)
+        self.refresh_plane_tree()
         self.canvas.show_image()
 
+    def closeEvent(self, event):
+        self.save_annotations()
+        super().closeEvent(event)
+
+    def normalized_annotations(self):
+        normalized = {}
+        for label, data in self.annotations.items():
+            points = [
+                [float(point[0]), float(point[1])]
+                for point in data.get("points", [])
+            ]
+            label_pos = data.get("label_pos")
+            normalized[label] = {
+                "points": points,
+                "label_pos": None if label_pos is None else [float(label_pos[0]), float(label_pos[1])],
+            }
+        return normalized
+
+    def load_annotations(self):
+        if not self.annotation_key or not ANNOTATIONS_FILE.exists():
+            return
+
+        try:
+            data = json.loads(ANNOTATIONS_FILE.read_text(encoding="utf-8"))
+            saved = data.get(self.annotation_key, {})
+        except Exception:
+            return
+
+        annotations = saved.get("annotations", {})
+        loaded = {}
+        for label, annotation in annotations.items():
+            points = []
+            for point in annotation.get("points", []):
+                if isinstance(point, (list, tuple)) and len(point) >= 2:
+                    points.append((float(point[0]), float(point[1])))
+            label_pos = annotation.get("label_pos")
+            if isinstance(label_pos, (list, tuple)) and len(label_pos) >= 2:
+                label_pos = (float(label_pos[0]), float(label_pos[1]))
+            else:
+                label_pos = None
+            loaded[str(label)] = {"points": points, "label_pos": label_pos}
+
+        if loaded:
+            self.annotations = loaded
+            self.current_plane = str(saved.get("current_plane") or next(iter(loaded)))
+            if self.current_plane not in self.annotations:
+                self.current_plane = next(iter(loaded))
+            self.label_edit.setText(self.current_plane)
+
+    def save_annotations(self):
+        if not self.annotation_key:
+            return
+
+        try:
+            ANNOTATIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            if ANNOTATIONS_FILE.exists():
+                data = json.loads(ANNOTATIONS_FILE.read_text(encoding="utf-8"))
+                if not isinstance(data, dict):
+                    data = {}
+            else:
+                data = {}
+            data[self.annotation_key] = {
+                "current_plane": self.current_plane,
+                "annotations": self.normalized_annotations(),
+            }
+            ANNOTATIONS_FILE.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+        except Exception:
+            pass
+
     def current_label(self):
-        label = self.label_edit.text().strip()
-        return label or "plane"
+        return self.current_plane or "plane"
+
+    def ensure_plane(self, label):
+        label = label.strip() or "plane"
+        return self.annotations.setdefault(label, {"points": [], "label_pos": None})
+
+    def next_plane_name(self):
+        index = 1
+        while f"plane {index}" in self.annotations:
+            index += 1
+        return f"plane {index}"
+
+    def add_plane(self):
+        self.current_plane = self.next_plane_name()
+        self.ensure_plane(self.current_plane)
+        self.label_edit.setText(self.current_plane)
+        self.refresh_plane_tree()
+        self.save_annotations()
+        self.canvas.show_image()
+
+    def rename_current_plane(self):
+        old_label = self.current_plane
+        new_label = self.label_edit.text().strip() or old_label or "plane"
+        if new_label == old_label:
+            self.label_edit.setText(self.current_plane)
+            return
+
+        data = self.annotations.pop(old_label, {"points": [], "label_pos": None})
+        if new_label in self.annotations:
+            new_label = self.next_plane_name()
+        self.annotations[new_label] = data
+        self.current_plane = new_label
+        self.label_edit.setText(new_label)
+        self.refresh_plane_tree()
+        self.save_annotations()
+        self.canvas.show_image()
+
+    def refresh_plane_tree(self):
+        self._syncing_tree = True
+        self.plane_tree.clear()
+        current_item = None
+        for label, data in self.annotations.items():
+            points = data.get("points", [])
+            plane_item = QTreeWidgetItem([f"{label} ({len(points)} point{'s' if len(points) != 1 else ''})"])
+            plane_item.setData(0, Qt.UserRole, ("plane", label, None))
+            self.plane_tree.addTopLevelItem(plane_item)
+            if label == self.current_plane:
+                current_item = plane_item
+
+            for index, point in enumerate(points, start=1):
+                x, y = point
+                point_item = QTreeWidgetItem([f"Point {index}: x={x + 1:.1f}, y={y + 1:.1f}"])
+                point_item.setData(0, Qt.UserRole, ("point", label, index - 1))
+                plane_item.addChild(point_item)
+            plane_item.setExpanded(True)
+
+        if current_item is not None:
+            self.plane_tree.setCurrentItem(current_item)
+        self._syncing_tree = False
+
+    def tree_selection_changed(self, current, previous):
+        if self._syncing_tree or current is None:
+            return
+        data = current.data(0, Qt.UserRole)
+        if not data:
+            return
+        _kind, label, _index = data
+        self.current_plane = label
+        self.label_edit.setText(label)
 
     def add_point(self, point):
         label = self.current_label()
-        data = self.annotations.setdefault(label, {"points": [], "label_pos": None})
+        data = self.ensure_plane(label)
         data["points"].append((float(point[0]), float(point[1])))
         if data["label_pos"] is None:
             data["label_pos"] = (float(point[0]) + 45.0, float(point[1]) - 35.0)
+        self.refresh_plane_tree()
+        self.save_annotations()
         self.canvas.show_image()
         self.update_coordinate_label(point)
 
@@ -363,12 +543,17 @@ class PlaneAnnotationDialog(QDialog):
         if data is None or not data.get("points"):
             return
         data["points"].pop()
-        if not data["points"]:
-            del self.annotations[label]
+        self.refresh_plane_tree()
+        self.save_annotations()
         self.canvas.show_image()
 
     def clear_annotations(self):
         self.annotations = {}
+        self.current_plane = "plane 1"
+        self.label_edit.setText(self.current_plane)
+        self.ensure_plane(self.current_plane)
+        self.refresh_plane_tree()
+        self.save_annotations()
         self.canvas.show_image()
 
     def save_png(self):
@@ -549,6 +734,7 @@ class ViewTab(QWidget):
         file_layout.addLayout(filters_layout)
         file_options_layout = QHBoxLayout()
         file_options_layout.setContentsMargins(0, 0, 0, 0)
+        file_options_layout.setSpacing(10)
         file_options_layout.addWidget(self.show_subfolders_checkbox)
         file_options_layout.addWidget(self.only_thumbs_up_checkbox)
         file_options_layout.addStretch(1)
@@ -2094,9 +2280,10 @@ class ViewTab(QWidget):
         raw_image = np.asarray(raw_image, dtype=float)
         display_image = self.prepare_display_image(raw_image)
         vmin, vmax = self.display_limits_for_save(display_image)
-        title = "Annotated image"
+        title = "Annotation"
         if self.current_file is not None:
-            title = f"Annotated image - {self.current_file.name}"
+            title = f"Annotation - {self.current_file.name}"
+        annotation_key = self.annotation_storage_key()
 
         dialog = PlaneAnnotationDialog(
             self,
@@ -2106,9 +2293,22 @@ class ViewTab(QWidget):
             vmax,
             self.calculate_q_at_pixel,
             title,
+            annotation_key,
         )
         self.annotation_dialog = dialog
         dialog.show()
+
+    def annotation_storage_key(self):
+        if self.current_file is None:
+            return None
+
+        parts = [str(Path(self.current_file).expanduser().resolve())]
+        if self.current_dataset_name:
+            parts.append(f"dataset={self.current_dataset_name}")
+        total_frames = self.n_frames if self.is_lazy_h5 else (self.images.shape[0] if self.images is not None else 1)
+        if total_frames > 1:
+            parts.append(f"frame={self.current_index + 1}")
+        return "#".join(parts)
 
     # ============================================================
     # SAVE

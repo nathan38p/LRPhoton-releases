@@ -1628,6 +1628,7 @@ class RadialTab(QWidget):
         self.only_thumbs_up_checkbox.stateChanged.connect(self.refresh_files)
         file_options_layout = QHBoxLayout()
         file_options_layout.setContentsMargins(0, 0, 0, 0)
+        file_options_layout.setSpacing(10)
         file_options_layout.addWidget(self.show_subfolders_checkbox)
         file_options_layout.addWidget(self.only_thumbs_up_checkbox)
         file_options_layout.addStretch(1)

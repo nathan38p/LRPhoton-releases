@@ -907,6 +907,7 @@ class CentreTab(QWidget):
 
         file_options_layout = QHBoxLayout()
         file_options_layout.setContentsMargins(0, 0, 0, 0)
+        file_options_layout.setSpacing(10)
         self.show_subfolders_checkbox = QCheckBox("Show subfolders")
         self.show_subfolders_checkbox.setChecked(False)
         self.show_subfolders_checkbox.stateChanged.connect(self.refresh_files)
