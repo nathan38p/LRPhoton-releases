@@ -314,38 +314,6 @@ def azimuthal_normalization_factor(header: dict, mode: str):
     return 1.0, "raw"
 
 
-def remove_isolated_profile_spikes(x, y, threshold=4.0):
-    x = np.asarray(x, dtype=float)
-    y = np.asarray(y, dtype=float)
-    if y.size < 7:
-        return y, 0
-
-    cleaned = y.copy()
-    replaced = 0
-    for index in range(y.size):
-        neighbor_indices = [
-            (index - 3) % y.size,
-            (index - 2) % y.size,
-            (index - 1) % y.size,
-            (index + 1) % y.size,
-            (index + 2) % y.size,
-            (index + 3) % y.size,
-        ]
-        neighbors = y[neighbor_indices]
-        neighbors = neighbors[np.isfinite(neighbors)]
-        if neighbors.size < 4 or not np.isfinite(y[index]):
-            continue
-
-        median = float(np.median(neighbors))
-        mad = float(np.median(np.abs(neighbors - median)))
-        local_scale = max(mad * 1.4826, abs(median) * 0.03, 1e-12)
-        if abs(y[index] - median) > threshold * local_scale:
-            cleaned[index] = median
-            replaced += 1
-
-    return cleaned, replaced
-
-
 ID02_DEFAULT_CENTER_X = 914.4
 ID02_DEFAULT_CENTER_Y = 996.5
 ID02_DEFAULT_DISTANCE_M = 10.0002
@@ -959,8 +927,6 @@ class AzimuthalTab(QWidget):
         self.axis_mask_pixels.setValue(0)
         self.axis_mask_pixels.setFixedHeight(24)
         self.axis_mask_pixels.setMinimumWidth(parameter_field_width)
-        self.remove_isolated_spikes = QCheckBox("Remove isolated spikes")
-        self.remove_isolated_spikes.setChecked(False)
         self.normalization_mode = QComboBox()
         self.normalization_mode.addItem("Raw detector intensity", "raw")
         self.normalization_mode.addItem("Counts/s: I / ExposureTime", "exposure")
@@ -1150,7 +1116,7 @@ class AzimuthalTab(QWidget):
             self.center_x, self.center_y, self.distance, self.pixel_x, self.pixel_y,
             self.wavelength, self.use_q_range, self.q_min, self.q_max, self.n_points,
             self.integration_engine, self.min_pixels_per_bin, self.axis_mask_pixels,
-            self.remove_isolated_spikes, self.normalization_mode, self.intensity_scale,
+            self.normalization_mode, self.intensity_scale,
             self.integrate_button, self.show_legend,
             self.frame_start_spin, self.frame_end_spin, self.prev_frame_button,
             self.next_frame_button, self.frame_slider,
@@ -1510,9 +1476,6 @@ class AzimuthalTab(QWidget):
         axis_mask_spin.setValue(self.axis_mask_pixels.value())
         axis_mask_spin.setFixedWidth(150)
 
-        despike_checkbox = QCheckBox("Remove isolated spikes")
-        despike_checkbox.setChecked(self.remove_isolated_spikes.isChecked())
-
         normalize_combo = QComboBox()
         for index in range(self.normalization_mode.count()):
             normalize_combo.addItem(
@@ -1533,7 +1496,6 @@ class AzimuthalTab(QWidget):
         settings_form.addRow("ψ points", points_spin)
         settings_form.addRow("Min pixels/bin", min_pixels_spin)
         settings_form.addRow("Axis mask (px)", axis_mask_spin)
-        settings_form.addRow("", despike_checkbox)
         settings_form.addRow("Intensity correction", normalize_combo)
         settings_form.addRow("I scale", scale_spin)
 
@@ -1557,7 +1519,6 @@ class AzimuthalTab(QWidget):
         self.n_points.setValue(points_spin.value())
         self.min_pixels_per_bin.setValue(min_pixels_spin.value())
         self.axis_mask_pixels.setValue(axis_mask_spin.value())
-        self.remove_isolated_spikes.setChecked(despike_checkbox.isChecked())
         self.normalization_mode.setCurrentIndex(normalize_combo.currentIndex())
         self.intensity_scale.setValue(scale_spin.value())
         self.set_instrument_mode("Custom")
@@ -1701,9 +1662,6 @@ class AzimuthalTab(QWidget):
                     self.normalization_mode.currentData(),
                 )
                 intensity = intensity * normalization_factor * self.intensity_scale.value()
-                despiked_count = 0
-                if self.remove_isolated_spikes.isChecked():
-                    intensity, despiked_count = remove_isolated_profile_spikes(psi, intensity)
 
                 ax.plot(psi, intensity, linewidth=1.2, label=file_path.stem)
                 self.last_results[file_path.stem] = (psi, intensity, counts)
@@ -1719,7 +1677,6 @@ class AzimuthalTab(QWidget):
                     f"Integrated: {file_path.name} ({psi.size} ψ points) | q crown = {q_min:.8g} -> {q_max:.8g} nm⁻¹"
                     f" | engine = {engine} ; min {self.min_pixels_per_bin.value()} pixels/bin"
                     f" ; axis mask = {self.axis_mask_pixels.value()} px ; I<=0 masked"
-                    f" ; isolated spikes removed = {despiked_count}"
                     f" | intensity = {normalization_label} ; scale = {self.intensity_scale.value():.8g}"
                 )
 
@@ -1824,7 +1781,6 @@ class AzimuthalTab(QWidget):
                 file.write(f"# psi_points {self.n_points.value()}\n")
                 file.write(f"# min_pixels_per_bin {self.min_pixels_per_bin.value()}\n")
                 file.write(f"# axis_mask_px {self.axis_mask_pixels.value()}\n")
-                file.write(f"# remove_isolated_spikes {self.remove_isolated_spikes.isChecked()}\n")
                 file.write("# nonpositive_pixels masked\n")
                 file.write(f"# intensity_correction {self.normalization_mode.currentText()}\n")
                 file.write(f"# intensity_scale {self.intensity_scale.value():.8g}\n")

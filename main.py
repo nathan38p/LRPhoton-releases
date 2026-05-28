@@ -177,11 +177,11 @@ class ColoredTabBar(QTabBar):
     TAB_COLORS = {
         0: ("#dbeafe", "#2563eb"),  # View 2D
         1: ("#dbeafe", "#2563eb"),  # Plot 1D
-        2: ("#fee2e2", "#dc2626"),  # Center
-        3: ("#fee2e2", "#dc2626"),  # Background
-        4: ("#fee2e2", "#dc2626"),  # Average
-        5: ("#fee2e2", "#dc2626"),  # Cave
-        6: ("#fee2e2", "#dc2626"),  # Unfold
+        2: ("#ffedd5", "#f97316"),  # Center
+        3: ("#ffedd5", "#f97316"),  # Background
+        4: ("#ffedd5", "#f97316"),  # Average
+        5: ("#ffedd5", "#f97316"),  # Cave
+        6: ("#ffedd5", "#f97316"),  # Unfold
         7: ("#dcfce7", "#16a34a"),  # Radial
         8: ("#dcfce7", "#16a34a"),  # Azimuthal
         9: ("#f3e8ff", "#9333ea"),  # Anisotropy

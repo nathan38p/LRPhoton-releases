@@ -1735,7 +1735,7 @@ class HermansTab(QWidget):
 
         for widget in getattr(self, "anisotropy_param_widgets", []):
             if widget is not None:
-                widget.setVisible(anisotropy_mode or order_mode)
+                widget.setVisible(anisotropy_mode)
 
         for widget in getattr(self, "order_param_widgets", []):
             if widget is not None:

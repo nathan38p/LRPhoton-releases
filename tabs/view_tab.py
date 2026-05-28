@@ -824,7 +824,7 @@ class ViewTab(QWidget):
         self.set_q_geometry_mode("XENOCS")
         info_box_layout.addLayout(q_buttons_layout)
         info_box_layout.addWidget(self.info_text)
-        self.open_annotation_button = QPushButton("Open annotated image")
+        self.open_annotation_button = QPushButton("✏️ Annotate image")
         self.open_annotation_button.clicked.connect(self.open_annotation_window)
         info_box_layout.addWidget(self.open_annotation_button)
         right_layout.addWidget(info_box)
