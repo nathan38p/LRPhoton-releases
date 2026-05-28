@@ -29,6 +29,8 @@ The installed application folder is usually:
 C:\Users\<your-user-name>\AppData\Local\Programs\LRPhoton
 ```
 
+If the installation does not work, install Python manually and move the extracted LRPhoton folder into the directory shown above. You can create a shortcut on your Desktop.
+
 ## MacOS Installation
 
 1. Install Python 3.14.5 from: https://www.python.org/downloads/
