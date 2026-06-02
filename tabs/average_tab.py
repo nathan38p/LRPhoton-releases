@@ -82,6 +82,7 @@ class AverageTab(QWidget):
         self.slider_scale = 1000
         self._syncing_folder = False
         self._syncing_frame_controls = False
+        self.selected_files_as_images = False
 
         self.build_ui()
         self.refresh_files()
@@ -173,7 +174,7 @@ class AverageTab(QWidget):
         file_layout.addWidget(refresh_button)
 
         self.file_list = QListWidget()
-        self.file_list.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.file_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         install_file_rating_menu(self.file_list)
         self.file_list.itemClicked.connect(self.open_selected_files)
         file_layout.addWidget(self.file_list, stretch=1)
@@ -502,7 +503,7 @@ class AverageTab(QWidget):
             )
 
         if not file_paths:
-            return
+            return False
 
         try:
             self.sources = []
@@ -511,9 +512,10 @@ class AverageTab(QWidget):
             self.clear_average_display()
             self.first_edf_header_text = ""
             self.first_edf_byte_order = "LowByteFirst"
+            self.selected_files_as_images = len(file_paths) > 1
 
             for file_path in file_paths:
-                self.add_file(Path(file_path))
+                self.add_file(Path(file_path), first_frame_only=self.selected_files_as_images)
 
             self.current_folder = Path(file_paths[0]).parent
             if hasattr(self, "folder_path"):
@@ -528,8 +530,24 @@ class AverageTab(QWidget):
             self.load_current_frame()
             self.set_controls_enabled(True)
             self.update_status()
+            return True
         except Exception as error:
             QMessageBox.critical(self, "File reading error", str(error))
+            return False
+
+    def source_paths(self):
+        return [Path(source["path"]) for source in self.sources]
+
+    def sync_selection_before_average(self):
+        selected = self.selected_files()
+        if not selected:
+            return True
+
+        selected_paths = [Path(path) for path in selected]
+        if selected_paths == self.source_paths():
+            return True
+
+        return self.open_files(selected_paths)
 
     def set_folder_from_external_tab(self, folder):
         folder = Path(folder).expanduser()
@@ -541,7 +559,7 @@ class AverageTab(QWidget):
                 self.refresh_files()
             self._syncing_folder = False
 
-    def add_file(self, path: Path):
+    def add_file(self, path: Path, first_frame_only=False):
         suffix = path.suffix.lower()
 
         if suffix == ".edf":
@@ -566,7 +584,8 @@ class AverageTab(QWidget):
                 "header": header,
                 "shape": dataset_shape,
             })
-            for frame_index in range(n_frames):
+            frame_count = 1 if first_frame_only else n_frames
+            for frame_index in range(frame_count):
                 self.frames.append({"source_index": source_index, "frame_index": frame_index})
             return
 
@@ -779,6 +798,8 @@ class AverageTab(QWidget):
         self.update_status()
 
     def run_average(self):
+        if not self.sync_selection_before_average():
+            return
         if not self.frames:
             return
 
@@ -880,6 +901,8 @@ class AverageTab(QWidget):
             f"Current file: {source['path'].name}",
             f"Current frame: {self.current_frame_index + 1} / {len(self.frames)}",
         ]
+        if self.selected_files_as_images:
+            lines.append("Mode: selected files as images")
 
         if source["type"] == "H5":
             lines.append(f"H5 dataset: {source['dataset_name']}")
