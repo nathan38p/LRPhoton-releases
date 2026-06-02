@@ -1740,6 +1740,10 @@ class RadialTab(QWidget):
             "linear log",
             "log log",
             "log linear",
+            "qI linear",
+            "qI log",
+            "qI log linear",
+            "qI linear log",
             "Kratky linear",
             "Kratky log",
             "Kratky log linear",
@@ -2465,7 +2469,7 @@ class RadialTab(QWidget):
                     q_max = 0
                     sector_min = self.sector_min.value() if self.use_sector.isChecked() else 0
                     sector_max = self.sector_max.value() if self.use_sector.isChecked() else 360
-                    use_log_bins = self.plot_mode.currentText() in ["log log", "log linear", "Kratky log", "Kratky log linear"]
+                    use_log_bins = self.plot_mode.currentText() in ["log log", "log linear", "qI log", "qI log linear", "Kratky log", "Kratky log linear"]
 
                     diagnostics = q_geometry_diagnostics(
                         image,
@@ -2672,6 +2676,8 @@ class RadialTab(QWidget):
 
     def make_plot_y(self, q, intensity):
         scaled_intensity = intensity * self.intensity_scale.value()
+        if self.plot_mode.currentText() in ["qI linear", "qI log", "qI log linear", "qI linear log"]:
+            return self.make_plot_x(q) * scaled_intensity
         if self.plot_mode.currentText() in ["Kratky linear", "Kratky log", "Kratky log linear", "Kratky linear log"]:
             return self.make_plot_x(q) ** 2 * scaled_intensity
         return scaled_intensity
@@ -2681,16 +2687,16 @@ class RadialTab(QWidget):
         y = np.asarray(self.make_plot_y(q, intensity), dtype=float)
         mode = self.plot_mode.currentText()
         valid = np.isfinite(x) & np.isfinite(y)
-        if mode in ["log log", "log linear", "Kratky log", "Kratky log linear"]:
+        if mode in ["log log", "log linear", "qI log", "qI log linear", "Kratky log", "Kratky log linear"]:
             valid &= x > 0
-        if mode in ["log log", "linear log", "Kratky log", "Kratky linear log", "2θ log"]:
+        if mode in ["log log", "linear log", "qI log", "qI linear log", "Kratky log", "Kratky linear log", "2θ log"]:
             valid &= y > 0
         x = x.copy()
         y = y.copy()
-        if mode in ["log log", "linear log", "Kratky log", "Kratky linear log", "2θ log"]:
+        if mode in ["log log", "linear log", "qI log", "qI linear log", "Kratky log", "Kratky linear log", "2θ log"]:
             y = self.interpolate_nonpositive_log_y(x, y, valid)
             valid = np.isfinite(x) & np.isfinite(y)
-            if mode in ["log log", "Kratky log"]:
+            if mode in ["log log", "qI log", "Kratky log"]:
                 valid &= x > 0
             if mode in ["2θ log"]:
                 valid &= x >= 0
@@ -2731,7 +2737,7 @@ class RadialTab(QWidget):
         ax.set_ylabel(
             "q²I(q)"
             if mode in ["Kratky linear", "Kratky log", "Kratky log linear", "Kratky linear log"]
-            else "I(q)"
+            else ("qI(q)" if mode in ["qI linear", "qI log", "qI log linear", "qI linear log"] else "I(q)")
         )
 
         if mode == "linear linear":
@@ -2746,6 +2752,18 @@ class RadialTab(QWidget):
         elif mode == "log linear":
             ax.set_xscale("log")
             ax.set_yscale("linear")
+        elif mode == "qI linear":
+            ax.set_xscale("linear")
+            ax.set_yscale("linear")
+        elif mode == "qI log":
+            ax.set_xscale("log")
+            ax.set_yscale("log")
+        elif mode == "qI log linear":
+            ax.set_xscale("log")
+            ax.set_yscale("linear")
+        elif mode == "qI linear log":
+            ax.set_xscale("linear")
+            ax.set_yscale("log")
         elif mode == "Kratky linear":
             ax.set_xscale("linear")
             ax.set_yscale("linear")
@@ -2819,8 +2837,11 @@ class RadialTab(QWidget):
         if self.plot_mode.currentText() in ["2θ linear", "2θ log"]:
             QMessageBox.warning(self, "Not an I(q) plot", "Power-law fitting is only available on q-based I(q) plots.")
             return
-        if self.plot_mode.currentText() in ["Kratky linear", "Kratky log", "Kratky log linear", "Kratky linear log"]:
-            QMessageBox.warning(self, "Kratky plot", "Switch to an I(q) mode before fitting I(q) = A q^-n.")
+        if self.plot_mode.currentText() in [
+            "qI linear", "qI log", "qI log linear", "qI linear log",
+            "Kratky linear", "Kratky log", "Kratky log linear", "Kratky linear log",
+        ]:
+            QMessageBox.warning(self, "Transformed plot", "Switch to an I(q) mode before fitting I(q) = A q^-n.")
             return
 
         dialog = QDialog(self)
@@ -2948,7 +2969,7 @@ class RadialTab(QWidget):
             fit_ax.set_ylabel(
                 "q²I(q)"
                 if mode in ["Kratky linear", "Kratky log", "Kratky log linear", "Kratky linear log"]
-                else "Intensity / a.u."
+                else ("qI(q)" if mode in ["qI linear", "qI log", "qI log linear", "qI linear log"] else "Intensity / a.u.")
             )
             fit_ax.grid(True, which="both")
             install_selectable_legend(fit_ax, fit_ax.legend(loc="best"))

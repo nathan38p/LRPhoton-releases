@@ -445,12 +445,17 @@ class MainWindow(QMainWindow):
         if available_width <= 0:
             return
 
+        available_height = max(0, self.pages_scroll_area.viewport().height())
         self.pages_scroll_area.setFixedWidth(available_width)
         self.pages.setFixedWidth(available_width)
+        if available_height > 0:
+            self.pages.setFixedHeight(available_height)
 
         current_page = self.pages.currentWidget()
         if current_page is not None:
             current_page.setFixedWidth(available_width)
+            if available_height > 0:
+                current_page.setFixedHeight(available_height)
 
     def resize_to_available_screen(self):
         screen = QApplication.primaryScreen()

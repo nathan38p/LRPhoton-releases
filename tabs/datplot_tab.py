@@ -5,6 +5,7 @@ import numpy as np
 
 from PySide6.QtCore import Qt, QEvent, QRectF, Signal, QMimeData, QTimer
 from PySide6.QtWidgets import (
+    QApplication,
     QWidget,
     QDialog,
     QDialogButtonBox,
@@ -37,7 +38,7 @@ from PySide6.QtWidgets import (
     QStyledItemDelegate,
     QStyleOptionViewItem,
 )
-from PySide6.QtGui import QColor, QDrag, QPainter, QPen
+from PySide6.QtGui import QColor, QDrag, QKeySequence, QPainter, QPen, QShortcut
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
@@ -1171,6 +1172,17 @@ class DatPlotTab(QWidget):
         data_table = QTableWidget(row_count.value(), curve_count.value() * 2)
         data_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         layout.addWidget(data_table, stretch=1)
+        paste_shortcut = QShortcut(QKeySequence.Paste, data_table)
+        paste_shortcut.activated.connect(
+            lambda: self.paste_clipboard_into_manual_dat_table(
+                data_table,
+                meta_table,
+                axis_widgets,
+                row_count,
+                curve_count,
+                lambda: rebuild_tables(True),
+            )
+        )
 
         axis_widgets = {}
 
@@ -1273,6 +1285,75 @@ class DatPlotTab(QWidget):
             return
 
         self.refresh_files()
+
+    def paste_clipboard_into_manual_dat_table(
+        self,
+        data_table,
+        meta_table,
+        axis_widgets,
+        row_count_spinbox,
+        curve_count_spinbox,
+        rebuild_callback=None,
+    ):
+        text = QApplication.clipboard().text()
+        if not text.strip():
+            return
+
+        rows = [
+            line.split("\t")
+            for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+            if line.strip()
+        ]
+        if not rows:
+            return
+
+        header_values = [value.strip() for value in rows[0]]
+        data_rows = rows[1:]
+        if not data_rows:
+            return
+
+        current_row = data_table.currentRow()
+        current_column = data_table.currentColumn()
+        start_row = current_row if current_row >= 0 else 0
+        start_column = current_column if current_column >= 0 else 0
+        needed_rows = start_row + len(data_rows)
+        needed_columns = start_column + max(len(row) for row in data_rows + [header_values])
+
+        if needed_rows > data_table.rowCount():
+            row_count_spinbox.setValue(min(row_count_spinbox.maximum(), needed_rows))
+
+        if needed_columns > data_table.columnCount():
+            needed_curves = int(np.ceil(needed_columns / 2.0))
+            curve_count_spinbox.setValue(min(curve_count_spinbox.maximum(), needed_curves))
+
+        if rebuild_callback is not None:
+            rebuild_callback()
+        else:
+            data_table.setRowCount(row_count_spinbox.value())
+            data_table.setColumnCount(curve_count_spinbox.value() * 2)
+
+        for column_offset, header in enumerate(header_values):
+            target_column = start_column + column_offset
+            if target_column >= data_table.columnCount():
+                break
+            data_table.setHorizontalHeaderItem(target_column, QTableWidgetItem(header))
+            curve_index = target_column // 2
+            meta_column = 2 if target_column % 2 == 0 else 3
+            if curve_index < meta_table.rowCount():
+                meta_table.setItem(curve_index, meta_column, QTableWidgetItem(header))
+                if target_column % 2 == 1:
+                    legend = header or f"Curve {curve_index + 1}"
+                    meta_table.setItem(curve_index, 0, QTableWidgetItem(legend))
+
+        for row_offset, values in enumerate(data_rows):
+            target_row = start_row + row_offset
+            if target_row >= data_table.rowCount():
+                break
+            for column_offset, value in enumerate(values):
+                target_column = start_column + column_offset
+                if target_column >= data_table.columnCount():
+                    break
+                data_table.setItem(target_row, target_column, QTableWidgetItem(value.strip()))
 
     def write_manual_dat(self, out_path, meta_table, data_table, axis_widgets):
         curves = []
