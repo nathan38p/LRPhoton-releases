@@ -66,6 +66,15 @@ from .ui_style import (
 
 
 PLOT_Y_AXES = ("left", "left2", "right", "right2")
+PLOT_TRANSFORMED_MODES = {
+    "Kratky (q²I(q))": {"power": 2, "x_power": 1, "x_label": "q", "y_label": "q²I(q)"},
+    "qI(q)": {"power": 1, "x_power": 1, "x_label": "q", "y_label": "qI(q)"},
+    "q⁴I(q)": {"power": 4, "x_power": 1, "x_label": "q", "y_label": "q⁴I(q)"},
+    "q⁴I(q⁴)": {"power": 4, "x_power": 4, "x_label": "q⁴", "y_label": "q⁴I(q⁴)"},
+}
+PLOT_LOG_X_MODES = {"log linear", "log log", "Kratky (q²I(q))", "q⁴I(q)", "q⁴I(q⁴)"}
+PLOT_LOG_Y_MODES = {"linear log", "log log", "Kratky (q²I(q))", "q⁴I(q)", "q⁴I(q⁴)"}
+PLOT_LOG_LOG_MODES = PLOT_LOG_X_MODES & PLOT_LOG_Y_MODES
 
 
 # ============================================================
@@ -675,6 +684,8 @@ class DatPlotTab(QWidget):
             "log log",
             "Kratky (q²I(q))",
             "qI(q)",
+            "q⁴I(q)",
+            "q⁴I(q⁴)",
         ])
         self.plot_mode.setCurrentText("log log")
         self.plot_mode.currentTextChanged.connect(self.update_plot)
@@ -1897,7 +1908,7 @@ class DatPlotTab(QWidget):
         if self.curves_are_really_0_to_360():
             QMessageBox.warning(self, "Not an I(q) plot", "Power-law fitting is only available for I(q) curves.")
             return
-        if self.plot_mode.currentText() in ("Kratky (q²I(q))", "qI(q)"):
+        if self.plot_mode.currentText() in PLOT_TRANSFORMED_MODES:
             QMessageBox.warning(
                 self,
                 "Transformed plot",
@@ -2372,9 +2383,9 @@ class DatPlotTab(QWidget):
         y = np.asarray(y, dtype=float)
         valid = np.isfinite(x) & np.isfinite(y)
 
-        if mode in ("log linear", "log log"):
+        if mode in PLOT_LOG_X_MODES:
             valid &= x > 0
-        if mode in ("linear log", "log log"):
+        if mode in PLOT_LOG_Y_MODES:
             valid &= y > 0
 
         ranges = []
@@ -2802,12 +2813,10 @@ class DatPlotTab(QWidget):
 
     def make_plot_y(self, x, y):
         mode = self.plot_mode.currentText()
-
-        if mode == "Kratky (q²I(q))":
-            return self.make_plot_x(x) ** 2 * y
-
-        if mode == "qI(q)":
-            return self.make_plot_x(x) * y
+        transform = PLOT_TRANSFORMED_MODES.get(mode)
+        if transform is not None:
+            q = self.make_display_q(x)
+            return q ** transform["power"] * y
 
         return y
 
@@ -2815,6 +2824,14 @@ class DatPlotTab(QWidget):
         return 0.1 if self.q_axis_unit == "A" else 1.0
 
     def make_plot_x(self, x):
+        mode = self.plot_mode.currentText()
+        q = self.make_display_q(x)
+        transform = PLOT_TRANSFORMED_MODES.get(mode)
+        if transform is not None:
+            return q ** transform["x_power"]
+        return q
+
+    def make_display_q(self, x):
         if self.curves_are_really_0_to_360():
             return x
         return np.asarray(x, dtype=float) * self.q_display_factor()
@@ -2825,8 +2842,9 @@ class DatPlotTab(QWidget):
     def graph_coordinate_labels(self):
         if self.curves_are_really_0_to_360():
             return "ψ", "I"
-        if self.plot_mode.currentText() in ("Kratky (q²I(q))", "qI(q)"):
-            return "q", "q²I(q)"
+        transform = PLOT_TRANSFORMED_MODES.get(self.plot_mode.currentText())
+        if transform is not None:
+            return transform["x_label"], transform["y_label"]
         return "q", "I"
 
     def update_graph_coordinates(self, event):
@@ -2934,9 +2952,9 @@ class DatPlotTab(QWidget):
         y_values = np.concatenate(all_y)
 
         mode = self.plot_mode.currentText()
-        if mode in ["log linear", "log log"]:
+        if mode in PLOT_LOG_X_MODES:
             x_values = x_values[x_values > 0]
-        if mode in ["linear log", "log log"]:
+        if mode in PLOT_LOG_Y_MODES:
             y_values = y_values[y_values > 0]
 
         if x_values.size == 0 or y_values.size == 0:
@@ -3020,7 +3038,7 @@ class DatPlotTab(QWidget):
         self.draw_guide_bars(ax)
         self.draw_peak_labels(ax)
 
-        if mode == "linear linear" or mode == "Kratky":
+        if mode == "linear linear" or mode == "qI(q)":
             ax.set_xscale("linear")
             for target_ax in axis_map.values():
                 target_ax.set_yscale("linear")
@@ -3032,7 +3050,7 @@ class DatPlotTab(QWidget):
             ax.set_xscale("log")
             for target_ax in axis_map.values():
                 target_ax.set_yscale("linear")
-        elif mode == "log log":
+        elif mode in PLOT_LOG_LOG_MODES:
             ax.set_xscale("log")
             for target_ax in axis_map.values():
                 target_ax.set_yscale("log")
@@ -3044,14 +3062,21 @@ class DatPlotTab(QWidget):
             ax.set_xlim(0, 360)
             ax.set_xlabel(default_x_label)
         else:
+            transform = PLOT_TRANSFORMED_MODES.get(mode)
             curve_x_labels = [
                 str(curve.get("x_label", "")).strip()
                 for curve in visible_curves.values()
                 if str(curve.get("x_label", "")).strip()
             ]
-            default_x_label = curve_x_labels[0] if curve_x_labels else self.q_axis_label()
+            default_x_label = (
+                transform["x_label"]
+                if transform is not None and transform["x_power"] != 1
+                else (curve_x_labels[0] if curve_x_labels else self.q_axis_label())
+            )
             ax.set_xlabel(self.x_label.text() or default_x_label)
-            if curve_x_labels and (not self.x_label.text() or self.x_label.text() == self.q_axis_label()):
+            if transform is not None and transform["x_power"] != 1 and self.x_label.text() in ("", self.q_axis_label()):
+                ax.set_xlabel(default_x_label)
+            elif curve_x_labels and (not self.x_label.text() or self.x_label.text() == self.q_axis_label()):
                 ax.set_xlabel(default_x_label)
         axis_curve_labels = {}
         for axis_name in PLOT_Y_AXES:
@@ -3062,11 +3087,12 @@ class DatPlotTab(QWidget):
             ]
             if labels:
                 axis_curve_labels[axis_name] = labels[0]
+        transformed_y_label = PLOT_TRANSFORMED_MODES.get(mode, {}).get("y_label")
         axis_labels = {
-            "left": axis_curve_labels.get("left") or ("q²I(q)" if mode == "Kratky" else (self.y_label.text() or "Intensity / a.u.")),
-            "left2": axis_curve_labels.get("left2") or "Left 2 / a.u.",
-            "right": axis_curve_labels.get("right") or "Right / a.u.",
-            "right2": axis_curve_labels.get("right2") or "Right 2 / a.u.",
+            "left": axis_curve_labels.get("left") or transformed_y_label or (self.y_label.text() or "Intensity / a.u."),
+            "left2": axis_curve_labels.get("left2") or transformed_y_label or "Left 2 / a.u.",
+            "right": axis_curve_labels.get("right") or transformed_y_label or "Right / a.u.",
+            "right2": axis_curve_labels.get("right2") or transformed_y_label or "Right 2 / a.u.",
         }
         for axis_name, target_ax in axis_map.items():
             target_ax.set_ylabel(axis_labels[axis_name])
