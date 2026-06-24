@@ -1052,7 +1052,7 @@ class HermansTab(QWidget):
         geometry_layout = QVBoxLayout(geometry_box)
         geometry_layout.setContentsMargins(*GROUP_BOX_MARGINS)
         geometry_layout.setSpacing(4)
-        geometry_box.setFixedHeight(72)
+        geometry_box.setFixedHeight(86)
         self.geometry_box = geometry_box
         self.geometry_layout = geometry_layout
         controls_layout.addWidget(geometry_box, stretch=0)
@@ -1596,6 +1596,7 @@ class HermansTab(QWidget):
             preset_layout.addWidget(button)
             button.hide()
         self.line_geometry_selector = LineGeometrySelector(self, "XENOCS")
+        self.line_geometry_selector.setMinimumHeight(32)
         self.line_geometry_selector.geometry_selected.connect(self.apply_line_geometry_selection)
         preset_layout.addWidget(self.line_geometry_selector, 1)
         instrument_layout.addLayout(preset_layout)

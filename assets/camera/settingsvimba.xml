@@ -1,0 +1,315 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<ModuleSettings>
+    <SettingsStruct>
+        <PersistType Description="Persist all features except LUTs" Value="2" />
+        <MaxIterations Description="How often implementation shall try to write values to specific feature (due to complex feature dependencies, multiple write operations are sometimes necessary)" Value="10" />
+        <LoggingLevel Description="All: all messages will be logged (Info, Error, Warning, Debug, Trace)" Value="4" />
+    </SettingsStruct>
+    <CameraInfo Id="DEV_000F315BB2BF" Model="Mako G-419B (5049)">
+        <LocalDevice>
+            <Feature Name="DeviceDisplayName" Value="Allied Vision Technologies Mako G-419B (5049) (DEV_000F315BB2BF)" Type="String" />
+            <Feature Name="DeviceEndianessMechanism" Value="Legacy" Type="Enum" />
+            <Feature Name="DeviceID" Value="DEV_000F315BB2BF" Type="String" />
+            <Feature Name="DeviceModelName" Value="Mako G-419B (5049)" Type="String" />
+            <Feature Name="DeviceType" Value="GEV" Type="Enum" />
+            <Feature Name="DeviceVendorName" Value="Allied Vision Technologies" Type="String" />
+            <Feature Name="GVCPCmdRetries" Value="5" Type="Int" />
+            <Feature Name="GVCPCmdTimeout" Value="250" Type="Int" />
+            <Feature Name="GevDeviceGateway" Value="0" Type="Int" />
+            <Feature Name="GevDeviceIPAddress" Value="2852039088" Type="Int" />
+            <Feature Name="GevDeviceMACAddress" Value="65252602559" Type="Int" />
+            <Feature Name="GevDeviceSubnetMask" Value="4294901760" Type="Int" />
+            <Feature Name="GevHeartbeatInterval" Value="1450" Type="Int" />
+            <Feature Name="GevHeartbeatTimeout" Value="3000" Type="Int" />
+            <Feature Name="StreamCount" Value="1" Type="Int" />
+            <SelectorGroup Name="StreamSelector" Type="Int" Value="0">
+                <Feature Name="StreamID" Value="DEV_000F315BB2BF-Stream-000" Type="String" />
+            </SelectorGroup>
+            <Feature Name="StreamSelector" Value="0" Type="Int" />
+        </LocalDevice>
+        <RemoteDevice>
+            <Feature Name="AcquisitionFrameCount" Value="1" Type="Int" />
+            <Feature Name="AcquisitionFrameRateAbs" Value="26.36992" Type="Float" />
+            <Feature Name="AcquisitionFrameRateLimit" Value="67.16819" Type="Float" />
+            <Feature Name="AcquisitionMode" Value="Continuous" Type="Enum" />
+            <Feature Name="BandwidthControlMode" Value="StreamBytesPerSecond" Type="Enum" />
+            <Feature Name="BlackLevel" Value="4" Type="Float" />
+            <Feature Name="BlackLevelSelector" Value="All" Type="Enum" />
+            <Feature Name="ChunkModeActive" Value="0" Type="Bool" />
+            <Feature Name="DSPSubregionBottom" Value="796" Type="Int" />
+            <Feature Name="DSPSubregionLeft" Value="0" Type="Int" />
+            <Feature Name="DSPSubregionRight" Value="796" Type="Int" />
+            <Feature Name="DSPSubregionTop" Value="0" Type="Int" />
+            <Feature Name="DecimationHorizontal" Value="1" Type="Int" />
+            <Feature Name="DecimationVertical" Value="1" Type="Int" />
+            <Feature Name="DefectMaskEnable" Value="1" Type="Bool" />
+            <Feature Name="DeviceFirmwareVersion" Value="00.01.54.18391 " Type="String" />
+            <Feature Name="DeviceID" Value="50-0536880703" Type="String" />
+            <Feature Name="DeviceModelName" Value="Mako G-419B" Type="String" />
+            <Feature Name="DevicePartNumber" Value="5049" Type="String" />
+            <Feature Name="DeviceScanType" Value="Areascan" Type="Enum" />
+            <Feature Name="DeviceTemperature" Value="54.218" Type="Float" />
+            <Feature Name="DeviceTemperatureSelector" Value="Main" Type="Enum" />
+            <Feature Name="DeviceUserID" Value="" Type="String" />
+            <Feature Name="DeviceVendorName" Value="Allied Vision Technologies" Type="String" />
+            <Feature Name="EventAcquisitionEnd" Value="40001" Type="Int" />
+            <Feature Name="EventAcquisitionRecordTrigger" Value="40004" Type="Int" />
+            <Feature Name="EventAcquisitionStart" Value="40000" Type="Int" />
+            <Feature Name="EventError" Value="65535" Type="Int" />
+            <Feature Name="EventExposureEnd" Value="40003" Type="Int" />
+            <Feature Name="EventExposureStart" Value="40019" Type="Int" />
+            <Feature Name="EventFrameTrigger" Value="40002" Type="Int" />
+            <Feature Name="EventFrameTriggerReady" Value="40018" Type="Int" />
+            <Feature Name="EventLine1FallingEdge" Value="40011" Type="Int" />
+            <Feature Name="EventLine1RisingEdge" Value="40010" Type="Int" />
+            <Feature Name="EventLine2FallingEdge" Value="40013" Type="Int" />
+            <Feature Name="EventLine2RisingEdge" Value="40012" Type="Int" />
+            <Feature Name="EventOverflow" Value="65534" Type="Int" />
+            <SelectorGroup Name="EventSelector" Type="Enum" Value="AcquisitionStart">
+                <Feature Name="EventNotification" Value="Off" Type="Enum" />
+            </SelectorGroup>
+            <SelectorGroup Name="EventSelector" Type="Enum" Value="AcquisitionEnd">
+                <Feature Name="EventNotification" Value="Off" Type="Enum" />
+            </SelectorGroup>
+            <SelectorGroup Name="EventSelector" Type="Enum" Value="FrameTrigger">
+                <Feature Name="EventNotification" Value="Off" Type="Enum" />
+            </SelectorGroup>
+            <SelectorGroup Name="EventSelector" Type="Enum" Value="ExposureEnd">
+                <Feature Name="EventNotification" Value="Off" Type="Enum" />
+            </SelectorGroup>
+            <SelectorGroup Name="EventSelector" Type="Enum" Value="AcquisitionRecordTrigger">
+                <Feature Name="EventNotification" Value="Off" Type="Enum" />
+            </SelectorGroup>
+            <SelectorGroup Name="EventSelector" Type="Enum" Value="Line1RisingEdge">
+                <Feature Name="EventNotification" Value="Off" Type="Enum" />
+            </SelectorGroup>
+            <SelectorGroup Name="EventSelector" Type="Enum" Value="Line1FallingEdge">
+                <Feature Name="EventNotification" Value="Off" Type="Enum" />
+            </SelectorGroup>
+            <SelectorGroup Name="EventSelector" Type="Enum" Value="FrameTriggerReady">
+                <Feature Name="EventNotification" Value="Off" Type="Enum" />
+            </SelectorGroup>
+            <SelectorGroup Name="EventSelector" Type="Enum" Value="ExposureStart">
+                <Feature Name="EventNotification" Value="Off" Type="Enum" />
+            </SelectorGroup>
+            <Feature Name="EventSelector" Value="AcquisitionStart" Type="Enum" />
+            <Feature Name="EventsEnable1" Value="0" Type="Int" />
+            <Feature Name="ExposureAuto" Value="Off" Type="Enum" />
+            <Feature Name="ExposureAutoAdjustTol" Value="5" Type="Int" />
+            <Feature Name="ExposureAutoAlg" Value="Mean" Type="Enum" />
+            <Feature Name="ExposureAutoMax" Value="500000" Type="Int" />
+            <Feature Name="ExposureAutoMin" Value="60" Type="Int" />
+            <Feature Name="ExposureAutoOutliers" Value="0" Type="Int" />
+            <Feature Name="ExposureAutoRate" Value="100" Type="Int" />
+            <Feature Name="ExposureAutoTarget" Value="50" Type="Int" />
+            <Feature Name="ExposureMode" Value="Timed" Type="Enum" />
+            <Feature Name="ExposureTimeAbs" Value="60" Type="Float" />
+            <Feature Name="ExposureTimePWL1" Value="15000" Type="Float" />
+            <Feature Name="ExposureTimePWL2" Value="15000" Type="Float" />
+            <Feature Name="FirmwareVerBuild" Value="18391" Type="Int" />
+            <Feature Name="FirmwareVerMajor" Value="1" Type="Int" />
+            <Feature Name="FirmwareVerMinor" Value="54" Type="Int" />
+            <Feature Name="GainAutoAdjustTol" Value="5" Type="Int" />
+            <Feature Name="GainAutoMax" Value="26" Type="Float" />
+            <Feature Name="GainAutoMin" Value="0" Type="Float" />
+            <Feature Name="GainAutoOutliers" Value="0" Type="Int" />
+            <Feature Name="GainAutoRate" Value="100" Type="Int" />
+            <Feature Name="GainAutoTarget" Value="50" Type="Int" />
+            <SelectorGroup Name="GainSelector" Type="Enum" Value="All">
+                <Feature Name="Gain" Value="0" Type="Float" />
+                <Feature Name="GainAuto" Value="Off" Type="Enum" />
+                <Feature Name="GainRaw" Value="0" Type="Int" />
+            </SelectorGroup>
+            <Feature Name="GainSelector" Value="All" Type="Enum" />
+            <Feature Name="Gamma" Value="1" Type="Float" />
+            <Feature Name="GevSCPSPacketSize" Value="8999" Type="Int" />
+            <Feature Name="GevTimestampTickFrequency" Value="1000000000" Type="Int" />
+            <Feature Name="GevTimestampValue" Value="0" Type="Int" />
+            <Feature Name="Height" Value="796" Type="Int" />
+            <Feature Name="HeightMax" Value="2046" Type="Int" />
+            <Feature Name="ImageSize" Value="950424" Type="Int" />
+            <SelectorGroup Name="LUTSelector" Type="Enum" Value="LUT1">
+                <Feature Name="LUTIndex" Value="0" Type="Int" />
+            </SelectorGroup>
+            <Feature Name="LUTSelector" Value="LUT1" Type="Enum" />
+            <Feature Name="NonImagePayloadSize" Value="0" Type="Int" />
+            <Feature Name="OffsetX" Value="626" Type="Int" />
+            <Feature Name="OffsetY" Value="626" Type="Int" />
+            <Feature Name="PayloadSize" Value="950424" Type="Int" />
+            <Feature Name="PixelFormat" Value="Mono12Packed" Type="Enum" />
+            <Feature Name="RecorderPreEventCount" Value="0" Type="Int" />
+            <Feature Name="ReverseX" Value="0" Type="Bool" />
+            <Feature Name="ReverseY" Value="1" Type="Bool" />
+            <Feature Name="SensorBits" Value="12" Type="Int" />
+            <Feature Name="SensorHeight" Value="2048" Type="Int" />
+            <Feature Name="SensorType" Value="Mono" Type="Enum" />
+            <Feature Name="SensorWidth" Value="2048" Type="Int" />
+            <Feature Name="StreamBytesPerSecond" Value="115000000" Type="Int" />
+            <Feature Name="StreamFrameRateConstrain" Value="1" Type="Bool" />
+            <Feature Name="StreamHoldCapacity" Value="66" Type="Int" />
+            <Feature Name="StreamHoldEnable" Value="Off" Type="Enum" />
+            <Feature Name="StrobeDelay" Value="0" Type="Int" />
+            <Feature Name="StrobeDuration" Value="0" Type="Int" />
+            <Feature Name="StrobeDurationMode" Value="Source" Type="Enum" />
+            <Feature Name="StrobeSource" Value="FrameTrigger" Type="Enum" />
+            <Feature Name="SyncInLevels" Value="0" Type="Int" />
+            <SelectorGroup Name="SyncInSelector" Type="Enum" Value="SyncIn1">
+                <Feature Name="SyncInGlitchFilter" Value="0" Type="Int" />
+            </SelectorGroup>
+            <Feature Name="SyncInSelector" Value="SyncIn1" Type="Enum" />
+            <Feature Name="SyncOutLevels" Value="0" Type="Int" />
+            <SelectorGroup Name="SyncOutSelector" Type="Enum" Value="SyncOut1">
+                <Feature Name="SyncOutSource" Value="Exposing" Type="Enum" />
+                <Feature Name="SyncOutPolarity" Value="Normal" Type="Enum" />
+            </SelectorGroup>
+            <SelectorGroup Name="SyncOutSelector" Type="Enum" Value="SyncOut2">
+                <Feature Name="SyncOutSource" Value="Exposing" Type="Enum" />
+                <Feature Name="SyncOutPolarity" Value="Normal" Type="Enum" />
+            </SelectorGroup>
+            <SelectorGroup Name="SyncOutSelector" Type="Enum" Value="SyncOut3">
+                <Feature Name="SyncOutSource" Value="Exposing" Type="Enum" />
+                <Feature Name="SyncOutPolarity" Value="Normal" Type="Enum" />
+            </SelectorGroup>
+            <Feature Name="SyncOutSelector" Value="SyncOut1" Type="Enum" />
+            <Feature Name="ThresholdPWL1" Value="63" Type="Int" />
+            <Feature Name="ThresholdPWL2" Value="63" Type="Int" />
+            <SelectorGroup Name="TriggerSelector" Type="Enum" Value="FrameStart">
+                <Feature Name="TriggerMode" Value="On" Type="Enum" />
+                <Feature Name="TriggerOverlap" Value="Off" Type="Enum" />
+                <Feature Name="TriggerSource" Value="Freerun" Type="Enum" />
+                <Feature Name="TriggerActivation" Value="RisingEdge" Type="Enum" />
+                <Feature Name="TriggerDelayAbs" Value="0" Type="Float" />
+            </SelectorGroup>
+            <SelectorGroup Name="TriggerSelector" Type="Enum" Value="AcquisitionStart">
+                <Feature Name="TriggerMode" Value="Off" Type="Enum" />
+                <Feature Name="TriggerSource" Value="Line1" Type="Enum" />
+                <Feature Name="TriggerActivation" Value="RisingEdge" Type="Enum" />
+            </SelectorGroup>
+            <SelectorGroup Name="TriggerSelector" Type="Enum" Value="AcquisitionEnd">
+                <Feature Name="TriggerMode" Value="Off" Type="Enum" />
+                <Feature Name="TriggerSource" Value="Line1" Type="Enum" />
+                <Feature Name="TriggerActivation" Value="RisingEdge" Type="Enum" />
+            </SelectorGroup>
+            <SelectorGroup Name="TriggerSelector" Type="Enum" Value="AcquisitionRecord">
+                <Feature Name="TriggerMode" Value="On" Type="Enum" />
+                <Feature Name="TriggerSource" Value="Line1" Type="Enum" />
+                <Feature Name="TriggerActivation" Value="RisingEdge" Type="Enum" />
+            </SelectorGroup>
+            <Feature Name="TriggerSelector" Value="FrameStart" Type="Enum" />
+            <Feature Name="UserSetSelector" Value="Default" Type="Enum" />
+            <Feature Name="Width" Value="796" Type="Int" />
+            <Feature Name="WidthMax" Value="2048" Type="Int" />
+            <IgnoredFeature Name="AcquisitionAbort" Type="Command" />
+            <IgnoredFeature Name="AcquisitionStart" Type="Command" />
+            <IgnoredFeature Name="AcquisitionStop" Type="Command" />
+            <IgnoredFeature Name="GevTimestampControlLatch" Type="Command" />
+            <IgnoredFeature Name="GevTimestampControlReset" Type="Command" />
+            <IgnoredFeature Name="LUTAddress" Type="Int" />
+            <IgnoredFeature Name="LUTBitDepthIn" Type="Int" />
+            <IgnoredFeature Name="LUTBitDepthOut" Type="Int" />
+            <IgnoredFeature Name="LUTEnable" Type="Bool" />
+            <IgnoredFeature Name="LUTLoadAll" Type="Command" />
+            <IgnoredFeature Name="LUTMode" Type="Enum" />
+            <IgnoredFeature Name="LUTSaveAll" Type="Command" />
+            <IgnoredFeature Name="LUTSizeBytes" Type="Int" />
+            <IgnoredFeature Name="LUTValue" Type="Int" />
+            <IgnoredFeature Name="TriggerSoftware" Type="Command" />
+            <IgnoredFeature Name="UserSetDefaultSelector" Type="Enum" />
+            <IgnoredFeature Name="UserSetLoad" Type="Command" />
+            <IgnoredFeature Name="UserSetSave" Type="Command" />
+        </RemoteDevice>
+    </CameraInfo>
+    <Stream Id="DEV_000F315BB2BF-Stream-000" Index="0">
+        <SelectorGroup Name="FramePacketStatisticsCounterSelector" Type="Enum" Value="Delivered">
+            <Feature Name="FramePacketStatisticsCounter" Value="1643154" Type="Int" />
+        </SelectorGroup>
+        <SelectorGroup Name="FramePacketStatisticsCounterSelector" Type="Enum" Value="Bad">
+            <Feature Name="FramePacketStatisticsCounter" Value="409" Type="Int" />
+        </SelectorGroup>
+        <SelectorGroup Name="FramePacketStatisticsCounterSelector" Type="Enum" Value="Missed">
+            <Feature Name="FramePacketStatisticsCounter" Value="409" Type="Int" />
+        </SelectorGroup>
+        <SelectorGroup Name="FramePacketStatisticsCounterSelector" Type="Enum" Value="Defective">
+            <Feature Name="FramePacketStatisticsCounter" Value="0" Type="Int" />
+        </SelectorGroup>
+        <SelectorGroup Name="FramePacketStatisticsCounterSelector" Type="Enum" Value="ResendRequested">
+            <Feature Name="FramePacketStatisticsCounter" Value="409" Type="Int" />
+        </SelectorGroup>
+        <SelectorGroup Name="FramePacketStatisticsCounterSelector" Type="Enum" Value="Resent">
+            <Feature Name="FramePacketStatisticsCounter" Value="0" Type="Int" />
+        </SelectorGroup>
+        <SelectorGroup Name="FramePacketStatisticsCounterSelector" Type="Enum" Value="StatusError">
+            <Feature Name="FramePacketStatisticsCounter" Value="0" Type="Int" />
+        </SelectorGroup>
+        <Feature Name="FramePacketStatisticsCounterSelector" Value="Delivered" Type="Enum" />
+        <SelectorGroup Name="FrameRateSelector" Type="Enum" Value="Sent">
+            <Feature Name="FrameRate" Value="67.16368" Type="Float" />
+        </SelectorGroup>
+        <SelectorGroup Name="FrameRateSelector" Type="Enum" Value="Received">
+            <Feature Name="FrameRate" Value="67.14969" Type="Float" />
+        </SelectorGroup>
+        <Feature Name="FrameRateSelector" Value="Sent" Type="Enum" />
+        <SelectorGroup Name="FrameStatisticsCounterSelector" Type="Enum" Value="Delivered">
+            <Feature Name="FrameStatisticsCounter" Value="2517" Type="Int" />
+        </SelectorGroup>
+        <SelectorGroup Name="FrameStatisticsCounterSelector" Type="Enum" Value="Bad">
+            <Feature Name="FrameStatisticsCounter" Value="4" Type="Int" />
+        </SelectorGroup>
+        <SelectorGroup Name="FrameStatisticsCounterSelector" Type="Enum" Value="Incomplete">
+            <Feature Name="FrameStatisticsCounter" Value="4" Type="Int" />
+        </SelectorGroup>
+        <SelectorGroup Name="FrameStatisticsCounterSelector" Type="Enum" Value="Missed">
+            <Feature Name="FrameStatisticsCounter" Value="0" Type="Int" />
+        </SelectorGroup>
+        <SelectorGroup Name="FrameStatisticsCounterSelector" Type="Enum" Value="Dropped">
+            <Feature Name="FrameStatisticsCounter" Value="0" Type="Int" />
+        </SelectorGroup>
+        <SelectorGroup Name="FrameStatisticsCounterSelector" Type="Enum" Value="Defective">
+            <Feature Name="FrameStatisticsCounter" Value="0" Type="Int" />
+        </SelectorGroup>
+        <SelectorGroup Name="FrameStatisticsCounterSelector" Type="Enum" Value="Reconstructed">
+            <Feature Name="FrameStatisticsCounter" Value="0" Type="Int" />
+        </SelectorGroup>
+        <Feature Name="FrameStatisticsCounterSelector" Value="Delivered" Type="Enum" />
+        <Feature Name="GVSPBurstSize" Value="1" Type="Int" />
+        <Feature Name="GVSPDriver" Value="Socket" Type="Enum" />
+        <Feature Name="GVSPFilterCompatibility" Value="NotFound" Type="Enum" />
+        <Feature Name="GVSPFilterVersion" Value="N/A" Type="String" />
+        <Feature Name="GVSPHostReceiveBufferSize" Value="67108864" Type="Int" />
+        <Feature Name="GVSPMaxLookBack" Value="30" Type="Int" />
+        <Feature Name="GVSPMaxRequests" Value="1" Type="Int" />
+        <Feature Name="GVSPMaxWaitSize" Value="100" Type="Int" />
+        <Feature Name="GVSPMissingSize" Value="256" Type="Int" />
+        <Feature Name="GVSPPacketSize" Value="1500" Type="Int" />
+        <Feature Name="GVSPProtocol" Value="UDP" Type="Enum" />
+        <Feature Name="GVSPTiltingSize" Value="100" Type="Int" />
+        <Feature Name="GVSPTimeout" Value="70" Type="Int" />
+        <Feature Name="MulticastEnable" Value="0" Type="Bool" />
+        <Feature Name="MulticastIPAddress" Value="4026470193" Type="Int" />
+        <Feature Name="StatFrameDelivered" Value="2517" Type="Int" />
+        <Feature Name="StatFrameDropped" Value="2" Type="Int" />
+        <Feature Name="StatFrameRate" Value="67.16368" Type="Float" />
+        <Feature Name="StatFrameRescued" Value="0" Type="Int" />
+        <Feature Name="StatFrameShoved" Value="2" Type="Int" />
+        <Feature Name="StatFrameUnderrun" Value="0" Type="Int" />
+        <Feature Name="StatLocalRate" Value="67.14969" Type="Float" />
+        <Feature Name="StatPacketErrors" Value="0" Type="Int" />
+        <Feature Name="StatPacketMissed" Value="409" Type="Int" />
+        <Feature Name="StatPacketReceived" Value="1643154" Type="Int" />
+        <Feature Name="StatPacketRequested" Value="409" Type="Int" />
+        <Feature Name="StatPacketResent" Value="0" Type="Int" />
+        <Feature Name="StatPacketUnavailable" Value="138" Type="Int" />
+        <Feature Name="StatTimeElapsed" Value="37.54964" Type="Float" />
+        <Feature Name="StreamAcquisitionModeSelector" Value="Default" Type="Enum" />
+        <Feature Name="StreamAnnounceBufferMinimum" Value="1" Type="Int" />
+        <Feature Name="StreamAnnouncedBufferCount" Value="7" Type="Int" />
+        <Feature Name="StreamBufferHandlingMode" Value="Default" Type="Enum" />
+        <Feature Name="StreamID" Value="DEV_000F315BB2BF-Stream-000" Type="String" />
+        <Feature Name="StreamInputBufferCount" Value="6" Type="Int" />
+        <Feature Name="StreamIsGrabbing" Value="1" Type="Bool" />
+        <Feature Name="StreamOutputBufferCount" Value="0" Type="Int" />
+        <Feature Name="StreamTimeElapsed" Value="37.54964" Type="Float" />
+        <Feature Name="StreamType" Value="GEV" Type="Enum" />
+        <IgnoredFeature Name="GVSPAdjustPacketSize" Type="Command" />
+    </Stream>
+</ModuleSettings>

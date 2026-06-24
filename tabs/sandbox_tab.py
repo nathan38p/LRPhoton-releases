@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -47,6 +48,8 @@ from tabs.sandbox_3d_view import Saxs3DProjectMixin
 from tabs.sandbox_imogolite import ImogoliteProjectMixin
 from tabs.sandbox_polynomials import PolynomialProjectMixin
 from tabs.background_tab import BackgroundTab
+from tabs.sandbox_header_editor import HeaderEditorTab
+from tabs.tools_tab import ToolsTab
 
 
 class SandboxTab(PolynomialProjectMixin, ImogoliteProjectMixin, Saxs3DProjectMixin, QWidget):
@@ -107,38 +110,42 @@ class SandboxTab(PolynomialProjectMixin, ImogoliteProjectMixin, Saxs3DProjectMix
         selector_title.setStyleSheet("font-size: 24px; font-weight: 700;")
         selector_layout.addWidget(selector_title)
 
-        selector_buttons = QHBoxLayout()
+        selector_buttons = QGridLayout()
         selector_buttons.setContentsMargins(0, 0, 0, 0)
-        selector_buttons.setSpacing(14)
-        selector_buttons.addStretch(1)
+        selector_buttons.setHorizontalSpacing(14)
+        selector_buttons.setVerticalSpacing(14)
 
-        self.open_3d_project_button = QPushButton("3D SAXS pattern")
-        self.open_3d_project_button.setMinimumSize(190, 70)
+        self.open_3d_project_button = self.make_project_button("🧊 3D SAXS pattern")
         self.open_3d_project_button.clicked.connect(lambda: self.open_sandbox_project("3D SAXS pattern"))
-        selector_buttons.addWidget(self.open_3d_project_button)
+        selector_buttons.addWidget(self.open_3d_project_button, 0, 0)
 
-        self.open_imogolite_project_button = QPushButton("Imogolite distance")
-        self.open_imogolite_project_button.setMinimumSize(190, 70)
+        self.open_imogolite_project_button = self.make_project_button("↔️ Imogolite distance")
         self.open_imogolite_project_button.clicked.connect(lambda: self.open_sandbox_project("Imogolite distance"))
-        selector_buttons.addWidget(self.open_imogolite_project_button)
+        selector_buttons.addWidget(self.open_imogolite_project_button, 0, 1)
 
-        self.open_polynomial_project_button = QPushButton("Beidellite ODF")
-        self.open_polynomial_project_button.setMinimumSize(190, 70)
+        self.open_polynomial_project_button = self.make_project_button("🧪 Beidellite ODF")
         self.open_polynomial_project_button.clicked.connect(lambda: self.open_sandbox_project("Beidellite ODF"))
-        selector_buttons.addWidget(self.open_polynomial_project_button)
+        selector_buttons.addWidget(self.open_polynomial_project_button, 0, 2)
 
-        self.open_background_project_button = QPushButton("Background")
-        self.open_background_project_button.setMinimumSize(190, 70)
+        self.open_background_project_button = self.make_project_button("🧹 Background")
         self.open_background_project_button.clicked.connect(self.open_background_project)
-        selector_buttons.addWidget(self.open_background_project_button)
+        selector_buttons.addWidget(self.open_background_project_button, 1, 0)
 
-        selector_buttons.addStretch(1)
+        self.open_header_editor_project_button = self.make_project_button("📝 Header editor")
+        self.open_header_editor_project_button.clicked.connect(self.open_header_editor_project)
+        selector_buttons.addWidget(self.open_header_editor_project_button, 1, 1)
+
+        self.open_tools_project_button = self.make_project_button("🛠️ Tools")
+        self.open_tools_project_button.clicked.connect(self.open_tools_project)
+        selector_buttons.addWidget(self.open_tools_project_button, 1, 2)
+
         selector_layout.addLayout(selector_buttons)
         selector_layout.addStretch(1)
         self.project_stack.addWidget(selector_page)
 
         splitter = QSplitter(Qt.Horizontal)
-        self.project_stack.addWidget(splitter)
+        self.sandbox_workbench_page = self.wrap_sandbox_project(splitter)
+        self.project_stack.addWidget(self.sandbox_workbench_page)
 
         file_box = QGroupBox("File browser")
         self.file_box = file_box
@@ -220,10 +227,6 @@ class SandboxTab(PolynomialProjectMixin, ImogoliteProjectMixin, Saxs3DProjectMix
         side_layout = QVBoxLayout(side_box)
         side_layout.setContentsMargins(10, 14, 10, 6)
         side_layout.setSpacing(4)
-
-        self.back_to_projects_button = QPushButton("← Projects")
-        self.back_to_projects_button.clicked.connect(self.show_project_selector)
-        side_layout.addWidget(self.back_to_projects_button)
 
         self.sandbox_project_combo = QComboBox()
         self.sandbox_project_combo.addItems([
@@ -523,7 +526,57 @@ class SandboxTab(PolynomialProjectMixin, ImogoliteProjectMixin, Saxs3DProjectMix
 
         self.background_project = BackgroundTab()
         self.background_project.folder_changed.connect(lambda folder: self.folder_changed.emit(Path(folder), self))
-        self.project_stack.addWidget(self.background_project)
+        self.background_project_page = self.wrap_sandbox_project(self.background_project)
+        self.project_stack.addWidget(self.background_project_page)
+
+        self.header_editor_project = HeaderEditorTab()
+        self.header_editor_project.folder_changed.connect(lambda folder: self.folder_changed.emit(Path(folder), self))
+        self.header_editor_project_page = self.wrap_sandbox_project(self.header_editor_project)
+        self.project_stack.addWidget(self.header_editor_project_page)
+
+        self.tools_project = ToolsTab()
+        self.tools_project.folder_changed.connect(lambda folder: self.folder_changed.emit(Path(folder), self))
+        self.tools_project_page = self.wrap_sandbox_project(self.tools_project)
+        self.project_stack.addWidget(self.tools_project_page)
+
+    def make_project_button(self, text):
+        button = QPushButton(text)
+        button.setMinimumSize(190, 70)
+        button.setCursor(Qt.PointingHandCursor)
+        button.setStyleSheet("""
+            QPushButton {
+                background-color: #fde68a;
+                color: #222222;
+                border: 0px;
+                border-radius: 14px;
+                padding: 10px 16px;
+                font-size: 14px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #facc15;
+            }
+            QPushButton:pressed {
+                background-color: #d97706;
+                color: white;
+            }
+        """)
+        return button
+
+    def wrap_sandbox_project(self, content_widget):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        layout.addWidget(self.make_back_to_projects_button(), 0)
+        layout.addWidget(content_widget, 1)
+        return page
+
+    def make_back_to_projects_button(self):
+        button = QPushButton("← Sandbox projects")
+        button.clicked.connect(self.show_project_selector)
+        button.setCursor(Qt.PointingHandCursor)
+        return button
 
     def form_row(self, label, widget):
         row = QHBoxLayout()
@@ -550,10 +603,16 @@ class SandboxTab(PolynomialProjectMixin, ImogoliteProjectMixin, Saxs3DProjectMix
         self.sandbox_project_combo.setCurrentText(name)
         self.sandbox_project_combo.blockSignals(False)
         self.apply_sandbox_project(name)
-        self.project_stack.setCurrentIndex(1)
+        self.project_stack.setCurrentWidget(self.sandbox_workbench_page)
 
     def open_background_project(self):
-        self.project_stack.setCurrentWidget(self.background_project)
+        self.project_stack.setCurrentWidget(self.background_project_page)
+
+    def open_header_editor_project(self):
+        self.project_stack.setCurrentWidget(self.header_editor_project_page)
+
+    def open_tools_project(self):
+        self.project_stack.setCurrentWidget(self.tools_project_page)
 
     def apply_sandbox_project(self, name):
         is_imogolite = name == "Imogolite distance"
@@ -728,6 +787,10 @@ class SandboxTab(PolynomialProjectMixin, ImogoliteProjectMixin, Saxs3DProjectMix
         self.refresh_files()
         if hasattr(self, "background_project"):
             self.background_project.set_folder_from_external_tab(str(folder))
+        if hasattr(self, "header_editor_project"):
+            self.header_editor_project.set_folder_from_external_tab(str(folder))
+        if hasattr(self, "tools_project"):
+            self.tools_project.set_folder_from_external_tab(str(folder))
 
     def set_folder_from_external_tab(self, folder):
         self.set_folder(folder)

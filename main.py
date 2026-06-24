@@ -358,7 +358,7 @@ class MainWindow(QMainWindow):
         title_row.addWidget(self.dev_label)
         title_row.addStretch()
 
-        subtitle = QLabel("SAXS / WAXS data processing")
+        subtitle = QLabel("SAXS/WAXS/SALS data processing")
         subtitle.setStyleSheet("""
             QLabel {
                 font-size: 12px;
@@ -401,19 +401,18 @@ class MainWindow(QMainWindow):
         self.tab_bar.addTab("🧬 Anisotropy")
         self.sandbox_tab_index = self.tab_bar.addTab("🧪 Sandbox")
 
-        is_development_copy = self.is_development_copy()
-
         self.tab_bar.setTabText(self.background_tab_index, "🧹 Background")
         self.tab_bar.setTabVisible(self.background_tab_index, False)
         self.tab_bar.setTabEnabled(self.background_tab_index, False)
 
         self.tab_bar.setTabText(self.tools_tab_index, "🛠️ Tools")
-        self.tab_bar.setTabEnabled(self.tools_tab_index, True)
+        self.tab_bar.setTabVisible(self.tools_tab_index, False)
+        self.tab_bar.setTabEnabled(self.tools_tab_index, False)
         self.tab_bar.setTabText(self.capture_sals_tab_index, "📷 Capture")
         self.tab_bar.setTabEnabled(self.capture_sals_tab_index, True)
         self.tab_bar.setTabText(self.sandbox_tab_index, "🧪 Sandbox")
-        self.tab_bar.setTabVisible(self.sandbox_tab_index, is_development_copy)
-        self.tab_bar.setTabEnabled(self.sandbox_tab_index, is_development_copy)
+        self.tab_bar.setTabVisible(self.sandbox_tab_index, True)
+        self.tab_bar.setTabEnabled(self.sandbox_tab_index, True)
         self.tab_bar.setTabVisible(self.unfold_tab_index, False)
 
         header_layout.addStretch()

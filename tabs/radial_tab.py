@@ -121,7 +121,7 @@ def read_edf_file(filename: str):
 
     match = re.search(r"EDF_HeaderSize\s*=\s*(\d+)", first)
     if not match:
-        raise ValueError("EDF_HeaderSize not found in EDF header.")
+        return read_edf_file_with_fabio(filename)
 
     header_size = int(match.group(1))
 
@@ -146,6 +146,29 @@ def read_edf_file(filename: str):
         raise ValueError(f"Incorrect EDF data size: expected {dim_1 * dim_2}, read {data.size}.")
 
     image = data.reshape((dim_2, dim_1)).astype(np.float64)
+    return image, header
+
+
+def read_edf_file_with_fabio(filename: str):
+    try:
+        import fabio
+    except ImportError as exc:
+        raise ValueError("EDF_HeaderSize not found in EDF header and fabio is not available.") from exc
+
+    edf = fabio.open(str(filename))
+    try:
+        image = np.asarray(edf.data, dtype=np.float64)
+        header = {str(key): str(value) for key, value in dict(getattr(edf, "header", {}) or {}).items()}
+    finally:
+        try:
+            edf.close()
+        except Exception:
+            pass
+
+    if image.ndim != 2:
+        raise ValueError(f"Expected a 2D EDF image, got shape {image.shape}.")
+    header.setdefault("Dim_1", str(image.shape[1]))
+    header.setdefault("Dim_2", str(image.shape[0]))
     return image, header
 
 
@@ -2231,7 +2254,9 @@ class RadialTab(QWidget):
     def selected_files(self):
         selected_items = list(self.file_list.selectedItems())
         current_item = self.file_list.currentItem()
-        if current_item is not None and current_item in selected_items:
+        if current_item is not None and current_item not in selected_items:
+            ordered_items = [current_item] + selected_items
+        elif current_item is not None:
             ordered_items = [current_item] + [item for item in selected_items if item is not current_item]
         else:
             ordered_items = selected_items

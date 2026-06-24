@@ -1,19 +1,29 @@
 from datetime import datetime
 from pathlib import Path
+import sys
 
 import numpy as np
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
+    QHeaderView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QAbstractItemView,
+    QApplication,
+    QPlainTextEdit,
     QPushButton,
     QComboBox,
     QSpinBox,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -22,22 +32,119 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
 from tabs.line_geometry import LineGeometrySelector, default_center_text
-from tabs.ui_style import GROUP_BOX_STYLE, PAGE_MARGINS, PANEL_MARGINS
+from tabs.ui_style import FILE_BROWSER_WIDTH, GROUP_BOX_STYLE, PAGE_MARGINS, PANEL_MARGINS
 
 
 class VimbaSALSWidget(QWidget):
     back_requested = Signal()
+    APP_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
     CAMERA_ID = "DEV_000F315BB2BF"
     CAMERA_MODEL = "Mako G-419B"
-    DEFAULT_ROI_SIZE = 796
+    DEFAULT_ROI_WIDTH = 796
+    DEFAULT_ROI_HEIGHT = 796
     DEFAULT_PIXEL_FORMAT = "Mono12Packed"
-    DEFAULT_OFFSET_X = "626"
-    DEFAULT_OFFSET_Y = "626"
-    DEFAULT_DISTANCE_M = "0,0035"
+    DEFAULT_OFFSET_X = 626
+    DEFAULT_OFFSET_Y = 626
+    DEFAULT_EXPOSURE_US = "60"
+    DEFAULT_GAIN = "0"
+    DEFAULT_PREVIEW_FPS = 26
+    DEFAULT_ACQUISITION_FRAME_RATE = 26.36992
+    DEFAULT_REVERSE_Y = False
+    DEFAULT_DISTANCE_M = "0,00477"
     DEFAULT_PIXEL_SIZE_M = "5,5e-6"
     DEFAULT_WAVELENGTH_M = "632,8e-9"
-    TEST_IMAGE_PATH = Path("/Users/nathanpiaget/Documents/Thèse LRP/Expériences/SALSGels/cnc6/10.6relax_nrm.edf")
-
+    VIMBA_SETTINGS_PATH = APP_ROOT / "assets" / "camera" / "settingsvimba.xml"
+    DEFAULT_CAMERA_FEATURES = (
+        ("Acquisition", "AcquisitionMode", "Continuous"),
+        ("Acquisition", "AcquisitionFrameCount", 1),
+        ("Acquisition", "AcquisitionFrameRate", DEFAULT_ACQUISITION_FRAME_RATE),
+        ("Acquisition", "RecorderPreEventCount", 0),
+        ("Acquisition / Trigger", "TriggerActivation", "RisingEdge"),
+        ("Acquisition / Trigger", "TriggerDelayAbs", 0.0),
+        ("Acquisition / Trigger", "TriggerMode", "On"),
+        ("Acquisition / Trigger", "TriggerOverlap", "Off"),
+        ("Acquisition / Trigger", "TriggerSelector", "FrameStart"),
+        ("Acquisition / Trigger", "TriggerSource", "Freerun"),
+        ("GigE", "BandwidthControlMode", "StreamBytesPerSecond"),
+        ("GigE", "ChunkModeActive", False),
+        ("GigE / GVCP", "GVCPCmdRetries", 5),
+        ("GigE / GVCP", "GVCPCmdTimeout", 250),
+        ("GigE / GVCP", "GevHeartbeatInterval", 1450),
+        ("GigE / GVCP", "GevHeartbeatTimeout", 3000),
+        ("GigE", "GevSCPSPacketSize", 8999),
+        ("GigE", "StreamBytesPerSecond", 115000000),
+        ("GigE", "StreamFrameRateConstrain", True),
+        ("GigE / StreamHold", "StreamHoldEnable", "Off"),
+        ("Controls / BlackLevel", "BlackLevel", 4.0),
+        ("Controls / BlackLevel", "BlackLevelSelector", "All"),
+        ("Controls / DSPSubregion", "DSPSubregionBottom", 796),
+        ("Controls / DSPSubregion", "DSPSubregionLeft", 0),
+        ("Controls / DSPSubregion", "DSPSubregionRight", 796),
+        ("Controls / DSPSubregion", "DSPSubregionTop", 0),
+        ("Controls", "DefectMaskEnable", True),
+        ("Controls / Exposure", "ExposureAuto", "Off"),
+        ("Controls / Exposure", "ExposureAutoAdjustTol", 5),
+        ("Controls / Exposure", "ExposureAutoAlg", "Mean"),
+        ("Controls / Exposure", "ExposureAutoMax", 500000),
+        ("Controls / Exposure", "ExposureAutoMin", 60),
+        ("Controls / Exposure", "ExposureAutoOutliers", 0),
+        ("Controls / Exposure", "ExposureAutoRate", 100),
+        ("Controls / Exposure", "ExposureAutoTarget", 50),
+        ("Controls / Exposure", "ExposureMode", "Timed"),
+        ("Controls / Exposure", "ExposureTimePWL1", 15000.0),
+        ("Controls / Exposure", "ExposureTimePWL2", 15000.0),
+        ("Controls / Exposure", "ThresholdPWL1", 63),
+        ("Controls / Exposure", "ThresholdPWL2", 63),
+        ("Controls / Gain", "GainAuto", "Off"),
+        ("Controls / Gain", "GainAutoAdjustTol", 5),
+        ("Controls / Gain", "GainAutoMax", 26.0),
+        ("Controls / Gain", "GainAutoMin", 0.0),
+        ("Controls / Gain", "GainAutoOutliers", 0),
+        ("Controls / Gain", "GainAutoRate", 100),
+        ("Controls / Gain", "GainAutoTarget", 50),
+        ("Controls / Gain", "GainSelector", "All"),
+        ("Controls", "Gamma", 1.0),
+        ("Controls / LUT", "LUTEnable", False),
+        ("Controls / LUT", "LUTIndex", 0),
+        ("Controls / LUT", "LUTMode", "Luminance"),
+        ("Controls / LUT", "LUTSelector", "LUT1"),
+        ("Controls / LUT", "LUTValue", 4095),
+        ("ImageMode", "DecimationHorizontal", 1),
+        ("ImageMode", "DecimationVertical", 1),
+        ("ImageMode", "ReverseX", False),
+        ("ImageMode", "ReverseY", DEFAULT_REVERSE_Y),
+        ("EventControl / EventData", "EventNotification", "Off"),
+        ("EventControl / EventData", "EventSelector", "AcquisitionStart"),
+        ("EventControl / EventData", "EventsEnable1", 0),
+        ("Stream / Settings", "GVSPBurstSize", 1),
+        ("Stream / Settings", "GVSPDriver", "Socket"),
+        ("Stream / Settings", "GVSPHostReceiveBufferSize", 67108864),
+        ("Stream / Settings", "GVSPHostReceiveBuffers", 512),
+        ("Stream / Settings", "GVSPMaxLookBack", 30),
+        ("Stream / Settings", "GVSPMaxRequests", 1),
+        ("Stream / Settings", "GVSPMaxWaitSize", 100),
+        ("Stream / Settings", "GVSPMissingSize", 256),
+        ("Stream / Settings", "GVSPPacketSize", 1500),
+        ("Stream / Settings", "GVSPProtocol", "UDP"),
+        ("Stream / Settings", "GVSPTiltingSize", 100),
+        ("Stream / Settings", "GVSPTimeout", 70),
+        ("Stream / Multicast", "MulticastEnable", False),
+        ("BufferHandlingControl", "StreamAnnouncedBufferCount", 7),
+        ("BufferHandlingControl", "StreamBufferHandlingMode", "Default"),
+        ("IO / Strobe", "StrobeDelay", 0),
+        ("IO / Strobe", "StrobeDuration", 0),
+        ("IO / Strobe", "StrobeDurationMode", "Source"),
+        ("IO / Strobe", "StrobeSource", "FrameTrigger"),
+        ("IO / SyncIn", "SyncInGlitchFilter", 0),
+        ("IO / SyncIn", "SyncInSelector", "SyncIn1"),
+        ("IO / SyncOut", "SyncOutPolarity", "Normal"),
+        ("IO / SyncOut", "SyncOutSelector", "SyncOut1"),
+        ("IO / SyncOut", "SyncOutSource", "Exposing"),
+    )
+    CAMERA_SETTING_ALIASES = {
+        "AcquisitionFrameRate": ("AcquisitionFrameRate", "AcquisitionFrameRateAbs"),
+        "ExposureTime": ("ExposureTime", "ExposureTimeAbs"),
+    }
     def __init__(self):
         super().__init__()
         self.vmb = None
@@ -46,9 +153,17 @@ class VimbaSALSWidget(QWidget):
         self.frame_index = 0
         self.output_folder = Path.home() / "LRPhoton_SALS"
         self.current_geometry_name = "SALS default"
+        self.is_closing = False
+        self.is_grabbing_frame = False
+        self.preview_xlim = None
+        self.preview_ylim = None
 
         self.live_timer = QTimer(self)
         self.live_timer.timeout.connect(self.grab_live_frame)
+
+        app = QApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(self.shutdown_camera)
 
         self.build_ui()
         self.update_connection_state(False)
@@ -65,7 +180,7 @@ class VimbaSALSWidget(QWidget):
 
         controls_box = QGroupBox("SALS acquisition")
         controls_box.setStyleSheet(GROUP_BOX_STYLE)
-        controls_box.setFixedWidth(360)
+        controls_box.setFixedWidth(FILE_BROWSER_WIDTH)
         controls_layout = QVBoxLayout(controls_box)
         controls_layout.setContentsMargins(*PANEL_MARGINS)
         controls_layout.setSpacing(6)
@@ -87,27 +202,22 @@ class VimbaSALSWidget(QWidget):
         live_buttons_layout.addWidget(self.stop_button)
         controls_layout.addLayout(live_buttons_layout)
 
-        self.test_image_button = QPushButton("Test image")
-        self.test_image_button.setToolTip("Load the SALS EDF test image instead of grabbing the camera.")
-        self.test_image_button.clicked.connect(self.load_test_image)
-        controls_layout.addWidget(self.test_image_button)
-
-        self.exposure_edit = QLineEdit("10000")
+        self.exposure_edit = QLineEdit(self.DEFAULT_EXPOSURE_US)
         self.exposure_edit.setToolTip("Vimba ExposureTime in microseconds when available.")
-        self.gain_edit = QLineEdit("")
+        self.gain_edit = QLineEdit(self.DEFAULT_GAIN)
         self.gain_edit.setPlaceholderText("auto/unchanged")
         self.width_spinbox = QSpinBox()
         self.width_spinbox.setRange(1, 10000)
-        self.width_spinbox.setValue(self.DEFAULT_ROI_SIZE)
+        self.width_spinbox.setValue(self.DEFAULT_ROI_WIDTH)
         self.height_spinbox = QSpinBox()
         self.height_spinbox.setRange(1, 10000)
-        self.height_spinbox.setValue(self.DEFAULT_ROI_SIZE)
+        self.height_spinbox.setValue(self.DEFAULT_ROI_HEIGHT)
         self.offset_x_spinbox = QSpinBox()
         self.offset_x_spinbox.setRange(0, 10000)
-        self.offset_x_spinbox.setValue(0)
+        self.offset_x_spinbox.setValue(self.DEFAULT_OFFSET_X)
         self.offset_y_spinbox = QSpinBox()
         self.offset_y_spinbox.setRange(0, 10000)
-        self.offset_y_spinbox.setValue(0)
+        self.offset_y_spinbox.setValue(self.DEFAULT_OFFSET_Y)
         self.pixel_format_combo = QComboBox()
         self.pixel_format_combo.setEditable(True)
         self.pixel_format_combo.addItems([
@@ -121,13 +231,14 @@ class VimbaSALSWidget(QWidget):
         self.pixel_format_combo.setToolTip("Camera PixelFormat. Packed formats are converted internally for display.")
         self.fps_spinbox = QSpinBox()
         self.fps_spinbox.setRange(1, 60)
-        self.fps_spinbox.setValue(2)
+        self.fps_spinbox.setValue(self.DEFAULT_PREVIEW_FPS)
+        self.reverse_y_checkbox = QCheckBox("Reverse Y")
+        self.reverse_y_checkbox.setChecked(self.DEFAULT_REVERSE_Y)
 
         camera_form = QFormLayout()
         camera_form.setContentsMargins(0, 0, 0, 0)
         camera_form.setSpacing(6)
         camera_form.addRow("Exposure (µs)", self.exposure_edit)
-        camera_form.addRow("Gain", self.gain_edit)
         roi_x_layout = QHBoxLayout()
         roi_x_layout.setContentsMargins(0, 0, 0, 0)
         roi_x_layout.setSpacing(4)
@@ -144,11 +255,19 @@ class VimbaSALSWidget(QWidget):
         camera_form.addRow("Height", roi_y_layout)
         camera_form.addRow("Pixel format", self.pixel_format_combo)
         camera_form.addRow("Preview fps", self.fps_spinbox)
+        camera_form.addRow("", self.reverse_y_checkbox)
         controls_layout.addLayout(camera_form)
 
-        self.apply_camera_button = QPushButton("Apply camera settings")
+        camera_buttons_layout = QHBoxLayout()
+        camera_buttons_layout.setContentsMargins(0, 0, 0, 0)
+        camera_buttons_layout.setSpacing(4)
+        self.camera_settings_button = QPushButton("All camera settings")
+        self.camera_settings_button.clicked.connect(self.show_camera_settings_dialog)
+        camera_buttons_layout.addWidget(self.camera_settings_button, 1)
+        self.apply_camera_button = QPushButton("Apply settings")
         self.apply_camera_button.clicked.connect(self.apply_camera_settings)
-        controls_layout.addWidget(self.apply_camera_button)
+        camera_buttons_layout.addWidget(self.apply_camera_button, 1)
+        controls_layout.addLayout(camera_buttons_layout)
 
         output_layout = QHBoxLayout()
         output_layout.setContentsMargins(0, 0, 0, 0)
@@ -182,8 +301,8 @@ class VimbaSALSWidget(QWidget):
         self.pixel_x_edit = QLineEdit("")
         self.pixel_y_edit = QLineEdit("")
         self.wavelength_edit = QLineEdit("")
-        self.center_x_edit = QLineEdit(self.default_center_text(self.DEFAULT_ROI_SIZE))
-        self.center_y_edit = QLineEdit(self.default_center_text(self.DEFAULT_ROI_SIZE))
+        self.center_x_edit = QLineEdit(self.default_center_text(self.DEFAULT_ROI_WIDTH))
+        self.center_y_edit = QLineEdit(self.default_center_text(self.DEFAULT_ROI_HEIGHT))
         self.width_spinbox.valueChanged.connect(self.update_default_center_x)
         self.height_spinbox.valueChanged.connect(self.update_default_center_y)
 
@@ -211,6 +330,9 @@ class VimbaSALSWidget(QWidget):
 
         self.figure = Figure(figsize=(6, 5))
         self.canvas = FigureCanvas(self.figure)
+        self.canvas.setFocusPolicy(Qt.StrongFocus)
+        self.canvas.grabGesture(Qt.PinchGesture)
+        self.canvas.installEventFilter(self)
         self.ax = self.figure.add_subplot(111)
         self.image_artist = None
         preview_layout.addWidget(self.canvas, 1)
@@ -269,24 +391,529 @@ class VimbaSALSWidget(QWidget):
     def apply_camera_settings(self):
         if self.camera is None:
             return
-        self.set_camera_feature("OffsetX", self.offset_x_spinbox.value())
-        self.set_camera_feature("OffsetY", self.offset_y_spinbox.value())
+        loaded_settings = self.load_vimba_settings_file()
+        if not loaded_settings:
+            self.apply_default_camera_features()
+        self.set_camera_feature("ReverseY", self.reverse_y_checkbox.isChecked())
         self.set_camera_feature("Width", self.width_spinbox.value())
         self.set_camera_feature("Height", self.height_spinbox.value())
+        self.set_camera_feature("OffsetX", self.offset_x_spinbox.value())
+        self.set_camera_feature("OffsetY", self.offset_y_spinbox.value())
         requested_pixel_format = self.pixel_format_combo.currentText().strip()
         self.set_camera_feature("PixelFormat", requested_pixel_format)
-        self.set_camera_feature("ExposureTime", self.optional_float(self.exposure_edit.text()))
+        exposure = self.optional_float(self.exposure_edit.text())
+        self.set_camera_feature("ExposureTime", exposure)
+        self.set_camera_feature("ExposureTimeAbs", exposure)
         self.set_camera_feature("Gain", self.optional_float(self.gain_edit.text()))
-        self.set_camera_feature("AcquisitionFrameRate", float(self.fps_spinbox.value()))
+        self.set_camera_feature("AcquisitionFrameRate", self.DEFAULT_ACQUISITION_FRAME_RATE)
+        self.set_camera_feature("AcquisitionFrameRateAbs", self.DEFAULT_ACQUISITION_FRAME_RATE)
+
+    def load_vimba_settings_file(self):
+        if self.camera is None or not self.VIMBA_SETTINGS_PATH.exists():
+            return False
+        try:
+            from vmbpy import ModulePersistFlags, PersistType
+
+            persist_flags = (
+                ModulePersistFlags.LocalDevice
+                | ModulePersistFlags.RemoteDevice
+                | ModulePersistFlags.Streams
+            )
+            self.camera.load_settings(
+                str(self.VIMBA_SETTINGS_PATH),
+                PersistType.NoLUT,
+                persist_flags,
+                max_iterations=10,
+            )
+            return True
+        except Exception as exc:
+            if not self.is_closing:
+                self.status_label.setText(f"Could not load Vimba settings XML: {exc}")
+            return False
+
+    def apply_default_camera_features(self):
+        for _, name, value in self.DEFAULT_CAMERA_FEATURES:
+            self.set_first_available_camera_feature(self.CAMERA_SETTING_ALIASES.get(name, (name,)), value)
+
+    def show_camera_settings_dialog(self):
+        if self.camera is None:
+            self.connect_camera()
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Réglages caméra")
+        dialog.resize(980, 760)
+
+        layout = QVBoxLayout(dialog)
+        title = QLabel(self.camera_settings_title())
+        title.setStyleSheet("font-weight: 600;")
+        layout.addWidget(title)
+
+        filter_layout = QHBoxLayout()
+        filter_layout.addWidget(QLabel("Filter pattern:"))
+        filter_edit = QLineEdit()
+        filter_edit.setPlaceholderText("Example: Gain|Width")
+        filter_layout.addWidget(filter_edit, 1)
+        search_button = QPushButton("Search")
+        filter_layout.addWidget(search_button)
+        layout.addLayout(filter_layout)
+
+        tree = QTreeWidget(dialog)
+        tree.setColumnCount(2)
+        tree.setHeaderLabels(["Feature", "Value"])
+        tree.setAlternatingRowColors(True)
+        tree.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        tree.setSortingEnabled(False)
+        self.populate_camera_settings_tree(tree)
+
+        header = tree.header()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        layout.addWidget(tree, 1)
+
+        show_description_checkbox = QCheckBox("Show Description")
+        show_description_checkbox.setChecked(True)
+        layout.addWidget(show_description_checkbox)
+
+        description_edit = QPlainTextEdit()
+        description_edit.setReadOnly(True)
+        description_edit.setMinimumHeight(60)
+        description_edit.setMaximumHeight(90)
+        layout.addWidget(description_edit)
+
+        message_label = QLabel("")
+        message_label.setWordWrap(True)
+        layout.addWidget(message_label)
+
+        apply_button = QPushButton("Appliquer à la caméra Vimba")
+        apply_button.clicked.connect(lambda: self.apply_camera_settings_tree(tree, message_label))
+        layout.addWidget(apply_button)
+        search_button.clicked.connect(lambda: self.filter_camera_settings_tree(tree, filter_edit.text()))
+        filter_edit.returnPressed.connect(search_button.click)
+        tree.currentItemChanged.connect(
+            lambda current, previous: self.update_camera_feature_description(
+                current,
+                description_edit,
+                show_description_checkbox.isChecked(),
+            )
+        )
+        show_description_checkbox.toggled.connect(
+            lambda checked: self.update_camera_feature_description(tree.currentItem(), description_edit, checked)
+        )
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        dialog.exec()
+
+    def populate_camera_settings_tree(self, tree):
+        group_items = {}
+        rows = self.vimba_camera_feature_rows() or self.camera_settings_rows()
+        root_item = QTreeWidgetItem(tree.invisibleRootItem(), ["Camera", ""])
+        root_item.setFlags(root_item.flags() & ~Qt.ItemIsEditable)
+        group_items["Camera"] = root_item
+        for section, name, value, feature in rows:
+            parent = self.camera_settings_group_item(tree, group_items, section)
+            item = QTreeWidgetItem(parent, [name, ""])
+            item.setData(0, Qt.UserRole, name)
+            item.setData(0, Qt.UserRole + 1, feature)
+            item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+            self.set_camera_feature_value_widget(tree, item, feature, value)
+        root_item.setExpanded(True)
+
+    def camera_settings_group_item(self, tree, group_items, section):
+        parent = group_items["Camera"]
+        path = ["Camera"]
+        for part in [item.strip() for item in section.split("/") if item.strip()]:
+            path.append(part)
+            key = " / ".join(path)
+            if key not in group_items:
+                group_item = QTreeWidgetItem(parent, [part, ""])
+                group_item.setFlags(group_item.flags() & ~Qt.ItemIsEditable)
+                group_items[key] = group_item
+            parent = group_items[key]
+        return parent
+
+    def camera_settings_title(self):
+        if self.camera is None:
+            return "Controller for Mako G-419B"
+        camera_id = self.safe_call(self.camera, "get_id") or self.CAMERA_ID
+        camera_name = self.safe_call(self.camera, "get_name") or self.CAMERA_MODEL
+        return f"Controller for {camera_name} ({camera_id})"
+
+    def vimba_camera_feature_rows(self):
+        if self.camera is None:
+            return []
+        rows = []
+        for container_name, container in self.vimba_feature_containers():
+            try:
+                features = list(container.get_all_features())
+            except Exception:
+                continue
+            for feature in features:
+                name = self.safe_call(feature, "get_name")
+                if not name:
+                    continue
+                category = self.safe_call(feature, "get_category") or ""
+                category = str(category).strip().strip("/")
+                if container_name:
+                    category = f"{container_name} / {category}" if category else container_name
+                rows.append((category, name, self.vimba_feature_value(feature), feature))
+        rows.sort(key=lambda row: (row[0].lower(), row[1].lower()))
+        return rows
+
+    def vimba_feature_containers(self):
+        if self.camera is None:
+            return []
+        containers = [("", self.camera)]
+        try:
+            streams = list(self.camera.get_streams())
+        except Exception:
+            streams = []
+        for index, stream in enumerate(streams, start=1):
+            containers.append((f"Stream {index}", stream))
+        return containers
+
+    def set_camera_feature_value_widget(self, tree, item, feature, value):
+        if self.vimba_feature_is_command(feature):
+            button = QPushButton("Command")
+            button.setEnabled(self.vimba_feature_writeable(feature))
+            button.clicked.connect(lambda: self.run_camera_command_feature(feature))
+            tree.setItemWidget(item, 1, button)
+            return
+
+        if self.vimba_feature_is_enum(feature):
+            widget = QComboBox()
+            values = self.vimba_enum_values(feature)
+            if values:
+                widget.addItems(values)
+            current = str(value)
+            if widget.findText(current) < 0:
+                widget.addItem(current)
+            widget.setCurrentText(current)
+        else:
+            widget = QLineEdit(str(value))
+        widget.setEnabled(feature is None or self.vimba_feature_writeable(feature))
+        tree.setItemWidget(item, 1, widget)
+
+    def camera_settings_rows(self):
+        rows = [
+            ("ImageFormat", "Width", self.width_spinbox.value(), None),
+            ("ImageFormat", "Height", self.height_spinbox.value(), None),
+            ("ImageFormat", "OffsetX", self.offset_x_spinbox.value(), None),
+            ("ImageFormat", "OffsetY", self.offset_y_spinbox.value(), None),
+            ("ImageFormat", "PixelFormat", self.pixel_format_combo.currentText().strip(), None),
+            ("ImageMode", "ReverseY", self.reverse_y_checkbox.isChecked(), None),
+            ("Controls / Exposure", "ExposureTime", self.exposure_edit.text().strip(), None),
+            ("Controls / Gain", "Gain", self.gain_edit.text().strip(), None),
+            ("Acquisition", "Preview fps", self.fps_spinbox.value(), None),
+        ]
+        for section, name, value in self.DEFAULT_CAMERA_FEATURES:
+            rows.append((section, name, value, None))
+        rows.extend([
+            ("ImageMode", "SensorWidth", 2048, None),
+            ("ImageMode", "SensorHeight", 2048, None),
+            ("Info", "DeviceModelName", self.CAMERA_MODEL, None),
+            ("Info", "SensorBits", 12, None),
+            ("SavedUserSets", "UserSetDefaultSelector", "Default", None),
+            ("SavedUserSets", "UserSetSelector", "Default", None),
+        ])
+        return rows
+
+    def apply_camera_settings_tree(self, tree, message_label):
+        values = self.camera_settings_tree_values(tree)
+
+        self.apply_camera_settings_to_ui(values)
+        if self.camera is None:
+            self.connect_camera()
+            self.apply_camera_settings_to_ui(values)
+            if self.camera is None:
+                message_label.setText("Impossible de connecter la caméra. Les valeurs de l'interface ont été mises à jour.")
+                self.update_connection_state(False)
+                return
+
+        failures = []
+        for name, raw_value in self.ordered_camera_settings(values):
+            if name == "Preview fps":
+                continue
+            value = self.camera_setting_value(name, raw_value)
+            feature_names = self.CAMERA_SETTING_ALIASES.get(name, (name,))
+            if not self.set_first_available_camera_feature(feature_names, value):
+                failures.append(name)
+
+        self.sync_fields_from_camera()
+        if failures:
+            message_label.setText(
+                f"Réglages envoyés. Non acceptés par Vimba: {', '.join(failures[:8])}"
+                + ("..." if len(failures) > 8 else "")
+            )
+        else:
+            message_label.setText("Réglages appliqués à la caméra Vimba.")
+
+    def camera_settings_tree_values(self, tree):
+        values = {}
+
+        def collect(item):
+            name = item.data(0, Qt.UserRole)
+            if name:
+                value_widget = tree.itemWidget(item, 1)
+                feature = item.data(0, Qt.UserRole + 1)
+                if feature is not None and self.vimba_feature_is_command(feature):
+                    pass
+                elif feature is not None and not self.vimba_feature_writeable(feature):
+                    pass
+                elif isinstance(value_widget, QComboBox):
+                    values[str(name)] = value_widget.currentText().strip()
+                elif value_widget is not None:
+                    values[str(name)] = value_widget.text().strip()
+                else:
+                    values[str(name)] = item.text(1).strip()
+            for child_index in range(item.childCount()):
+                collect(item.child(child_index))
+
+        root = tree.invisibleRootItem()
+        for index in range(root.childCount()):
+            collect(root.child(index))
+        return values
+
+    def filter_camera_settings_tree(self, tree, pattern):
+        pattern = pattern.strip()
+        root = tree.invisibleRootItem()
+        if not pattern:
+            self.set_tree_item_hidden_recursive(root, False)
+            return
+        try:
+            import re
+
+            matcher = re.compile(pattern, re.IGNORECASE)
+            matches = lambda text: bool(matcher.search(text))
+        except Exception:
+            lowered = pattern.lower()
+            matches = lambda text: lowered in text.lower()
+
+        def update(item):
+            own_match = matches(item.text(0)) or matches(self.camera_tree_item_value_text(tree, item))
+            child_match = False
+            for child_index in range(item.childCount()):
+                if update(item.child(child_index)):
+                    child_match = True
+            visible = own_match or child_match
+            item.setHidden(not visible)
+            if child_match:
+                item.setExpanded(True)
+            return visible
+
+        for index in range(root.childCount()):
+            update(root.child(index))
+
+    def camera_tree_item_value_text(self, tree, item):
+        widget = tree.itemWidget(item, 1)
+        if isinstance(widget, QComboBox):
+            return widget.currentText()
+        if isinstance(widget, QLineEdit):
+            return widget.text()
+        if isinstance(widget, QPushButton):
+            return widget.text()
+        return item.text(1)
+
+    def set_tree_item_hidden_recursive(self, item, hidden):
+        for child_index in range(item.childCount()):
+            child = item.child(child_index)
+            child.setHidden(hidden)
+            self.set_tree_item_hidden_recursive(child, hidden)
+
+    def update_camera_feature_description(self, item, description_edit, show_description):
+        if not show_description or item is None:
+            description_edit.clear()
+            return
+        feature = item.data(0, Qt.UserRole + 1)
+        if feature is None:
+            description_edit.setPlainText(item.text(0))
+            return
+        lines = [
+            self.safe_call(feature, "get_display_name") or self.safe_call(feature, "get_name") or "",
+            self.safe_call(feature, "get_tooltip") or "",
+            self.safe_call(feature, "get_description") or "",
+        ]
+        access = self.safe_call(feature, "get_access_mode")
+        visibility = self.safe_call(feature, "get_visibility")
+        if access is not None:
+            lines.append(f"Access: {access}")
+        if visibility is not None:
+            lines.append(f"Visibility: {visibility}")
+        description_edit.setPlainText("\n".join(str(line) for line in lines if line))
+
+    def vimba_feature_value(self, feature):
+        if feature is None or not self.vimba_feature_readable(feature) or self.vimba_feature_is_command(feature):
+            return ""
+        try:
+            value = feature.get()
+        except Exception:
+            return ""
+        if hasattr(value, "get_name"):
+            try:
+                return value.get_name()
+            except Exception:
+                return str(value)
+        return value
+
+    def vimba_feature_readable(self, feature):
+        if feature is None:
+            return True
+        try:
+            return feature.is_readable()
+        except Exception:
+            return False
+
+    def vimba_feature_writeable(self, feature):
+        if feature is None:
+            return True
+        try:
+            return feature.is_writeable()
+        except Exception:
+            return False
+
+    def vimba_feature_is_enum(self, feature):
+        return feature is not None and feature.__class__.__name__ == "EnumFeature"
+
+    def vimba_feature_is_command(self, feature):
+        return feature is not None and feature.__class__.__name__ == "CommandFeature"
+
+    def vimba_enum_values(self, feature):
+        try:
+            entries = feature.get_available_entries()
+        except Exception:
+            return []
+        values = []
+        for entry in entries:
+            if hasattr(entry, "get_name"):
+                try:
+                    values.append(entry.get_name())
+                    continue
+                except Exception:
+                    pass
+            values.append(str(entry))
+        return values
+
+    def run_camera_command_feature(self, feature):
+        try:
+            feature.run()
+            self.status_label.setText(f"Command sent: {feature.get_name()}")
+        except Exception as exc:
+            self.status_label.setText(f"Command failed: {exc}")
+
+    def safe_call(self, obj, method_name):
+        try:
+            return getattr(obj, method_name)()
+        except Exception:
+            return None
+
+    def apply_camera_settings_to_ui(self, values):
+        if "Width" in values:
+            self.width_spinbox.setValue(self.int_camera_setting(values["Width"], self.width_spinbox.value()))
+        if "Height" in values:
+            self.height_spinbox.setValue(self.int_camera_setting(values["Height"], self.height_spinbox.value()))
+        if "OffsetX" in values:
+            self.offset_x_spinbox.setValue(self.int_camera_setting(values["OffsetX"], self.offset_x_spinbox.value()))
+        if "OffsetY" in values:
+            self.offset_y_spinbox.setValue(self.int_camera_setting(values["OffsetY"], self.offset_y_spinbox.value()))
+        if "PixelFormat" in values:
+            self.set_pixel_format_text(values["PixelFormat"])
+        if "ReverseY" in values:
+            self.reverse_y_checkbox.setChecked(self.bool_camera_setting(values["ReverseY"], self.reverse_y_checkbox.isChecked()))
+        if "ExposureTime" in values:
+            self.exposure_edit.setText(values["ExposureTime"])
+        if "Gain" in values:
+            self.gain_edit.setText(values["Gain"])
+        if "Preview fps" in values:
+            self.fps_spinbox.setValue(self.int_camera_setting(values["Preview fps"], self.fps_spinbox.value()))
+
+    def ordered_camera_settings(self, values):
+        ordered_names = [
+            "AcquisitionMode",
+            "ExposureAuto",
+            "GainAuto",
+            "PixelFormat",
+            "Width",
+            "Height",
+            "OffsetX",
+            "OffsetY",
+            "ExposureTime",
+            "Gain",
+        ]
+        ordered_names.extend(name for _, name, _ in self.DEFAULT_CAMERA_FEATURES if name not in ordered_names)
+        ordered_names.extend(name for name in values if name not in ordered_names)
+        for name in ordered_names:
+            if name in values:
+                yield name, values[name]
+
+    def camera_setting_value(self, name, raw_value):
+        raw_value = str(raw_value).strip()
+        if raw_value.lower() in {"true", "on", "yes", "1"} and self.boolean_camera_setting(name):
+            return True
+        if raw_value.lower() in {"false", "off", "no", "0"} and self.boolean_camera_setting(name):
+            return False
+        numeric_defaults = self.camera_setting_numeric_defaults()
+        if name not in numeric_defaults:
+            return raw_value
+        default_value = numeric_defaults[name]
+        number = self.optional_float(raw_value)
+        if number is None:
+            return raw_value
+        if isinstance(default_value, int) and not isinstance(default_value, bool):
+            return int(round(number))
+        return number
+
+    def camera_setting_numeric_defaults(self):
+        defaults = {
+            "Width": self.DEFAULT_ROI_WIDTH,
+            "Height": self.DEFAULT_ROI_HEIGHT,
+            "OffsetX": self.DEFAULT_OFFSET_X,
+            "OffsetY": self.DEFAULT_OFFSET_Y,
+            "Preview fps": self.DEFAULT_PREVIEW_FPS,
+            "ExposureTime": float(self.DEFAULT_EXPOSURE_US),
+            "Gain": float(self.DEFAULT_GAIN),
+        }
+        defaults.update({name: value for _, name, value in self.DEFAULT_CAMERA_FEATURES if isinstance(value, (int, float))})
+        return defaults
+
+    def boolean_camera_setting(self, name):
+        for _, feature_name, value in self.DEFAULT_CAMERA_FEATURES:
+            if feature_name == name:
+                return isinstance(value, bool)
+        return False
+
+    def int_camera_setting(self, raw_value, fallback):
+        value = self.optional_float(raw_value)
+        if value is None:
+            return fallback
+        return int(round(value))
+
+    def bool_camera_setting(self, raw_value, fallback):
+        value = str(raw_value).strip().lower()
+        if value in {"1", "true", "yes", "on"}:
+            return True
+        if value in {"0", "false", "no", "off"}:
+            return False
+        return fallback
 
     def set_camera_feature(self, name, value):
         if value is None:
-            return
-        try:
-            feature = self.camera.get_feature_by_name(name)
-            feature.set(value)
-        except Exception:
-            pass
+            return False
+        for _, container in self.vimba_feature_containers():
+            try:
+                feature = container.get_feature_by_name(name)
+                feature.set(value)
+                return True
+            except Exception:
+                continue
+        return False
+
+    def set_first_available_camera_feature(self, names, value):
+        for name in names:
+            if self.set_camera_feature(name, value):
+                return True
+        return False
 
     def sync_fields_from_camera(self):
         width = self.camera_feature_value("Width")
@@ -294,9 +921,10 @@ class VimbaSALSWidget(QWidget):
         offset_x = self.camera_feature_value("OffsetX")
         offset_y = self.camera_feature_value("OffsetY")
         pixel_format = self.camera_feature_value("PixelFormat")
-        exposure = self.camera_feature_value("ExposureTime")
+        reverse_y = self.camera_feature_value("ReverseY")
+        exposure = self.camera_feature_value_any(("ExposureTime", "ExposureTimeAbs"))
         gain = self.camera_feature_value("Gain")
-        fps = self.camera_feature_value("AcquisitionFrameRate")
+        fps = self.camera_feature_value_any(("AcquisitionFrameRate", "AcquisitionFrameRateAbs"))
         self.refresh_pixel_format_choices()
 
         if width is not None:
@@ -309,6 +937,8 @@ class VimbaSALSWidget(QWidget):
             self.offset_y_spinbox.setValue(int(offset_y))
         if pixel_format is not None:
             self.set_pixel_format_text(str(pixel_format))
+        if reverse_y is not None:
+            self.reverse_y_checkbox.setChecked(bool(reverse_y))
         if exposure is not None:
             self.exposure_edit.setText(f"{float(exposure):.10g}")
         if gain is not None:
@@ -324,6 +954,13 @@ class VimbaSALSWidget(QWidget):
             return feature.get()
         except Exception:
             return None
+
+    def camera_feature_value_any(self, names):
+        for name in names:
+            value = self.camera_feature_value(name)
+            if value is not None:
+                return value
+        return None
 
     def refresh_pixel_format_choices(self):
         if self.camera is None:
@@ -358,7 +995,8 @@ class VimbaSALSWidget(QWidget):
         self.center_y_edit.setText(str(geometry.get("center_y", "")))
         self.pixel_x_edit.setText(str(geometry.get("pixel_x_m", "")))
         self.pixel_y_edit.setText(str(geometry.get("pixel_y_m", "")))
-        self.distance_edit.setText(str(geometry.get("distance_m", "")))
+        distance_m = self.DEFAULT_DISTANCE_M if name == "SALS default" else geometry.get("distance_m", "")
+        self.distance_edit.setText(str(distance_m))
         self.wavelength_edit.setText(str(geometry.get("wavelength_m", "")))
         if self.current_frame is not None:
             self.update_preview()
@@ -382,39 +1020,23 @@ class VimbaSALSWidget(QWidget):
         self.status_label.setText("Live acquisition running.")
         self.update_connection_state(True)
 
-    def stop_live(self):
+    def stop_live(self, update_status=True):
         self.live_timer.stop()
-        self.status_label.setText("Live acquisition stopped.")
-        self.update_connection_state(self.camera is not None)
-
-    def load_test_image(self):
-        if self.live_timer.isActive():
-            self.stop_live()
-        try:
-            import fabio
-
-            edf = fabio.open(str(self.TEST_IMAGE_PATH))
-            image = np.asarray(edf.data)
-            if image.ndim != 2:
-                raise ValueError(f"Expected a 2D EDF image, got shape {image.shape}.")
-            self.current_frame = np.flipud(image)
-            self.frame_index += 1
-            self.width_spinbox.setValue(int(self.current_frame.shape[1]))
-            self.height_spinbox.setValue(int(self.current_frame.shape[0]))
-            self.set_pixel_format_text("Test EDF")
-            self.update_preview()
-            self.save_button.setEnabled(True)
-            self.status_label.setText(f"Test image loaded: {self.TEST_IMAGE_PATH.name}")
+        if update_status and not self.is_closing:
+            self.status_label.setText("Live acquisition stopped.")
             self.update_connection_state(self.camera is not None)
-        except Exception as exc:
-            self.status_label.setText(f"Could not load test image: {exc}")
 
     def grab_live_frame(self):
-        if self.camera is None:
-            self.stop_live()
+        if self.is_closing:
             return
+        if self.camera is None:
+            self.stop_live(update_status=False)
+            return
+        self.is_grabbing_frame = True
         try:
             frame = self.camera.get_frame(timeout_ms=1000)
+            if self.is_closing:
+                return
             image = np.asarray(self.frame_to_numpy(frame))
             if image.ndim == 3 and image.shape[-1] == 1:
                 image = image[:, :, 0]
@@ -426,7 +1048,10 @@ class VimbaSALSWidget(QWidget):
             self.update_preview()
             self.save_button.setEnabled(True)
         except Exception as exc:
-            self.status_label.setText(f"Frame grab failed: {exc}")
+            if not self.is_closing:
+                self.status_label.setText(f"Frame grab failed: {exc}")
+        finally:
+            self.is_grabbing_frame = False
 
     def frame_to_numpy(self, frame):
         source_format = frame.get_pixel_format()
@@ -462,15 +1087,9 @@ class VimbaSALSWidget(QWidget):
         if self.current_frame is None:
             return
         image = np.asarray(self.current_frame, dtype=float)
+        display_image, vmin, vmax = self.preview_display_image(image)
         self.ax.clear()
-        finite = np.isfinite(image)
-        if np.any(finite):
-            vmin, vmax = np.nanpercentile(image[finite], [1, 99])
-            if vmax <= vmin:
-                vmax = vmin + 1
-        else:
-            vmin, vmax = 0, 1
-        self.ax.imshow(image, cmap="jet", origin="upper", vmin=vmin, vmax=vmax)
+        self.ax.imshow(display_image, cmap="jet", origin="upper", vmin=vmin, vmax=vmax)
         center_x = self.optional_float(self.center_x_edit.text())
         center_y = self.optional_float(self.center_y_edit.text())
         if center_x is None:
@@ -479,10 +1098,159 @@ class VimbaSALSWidget(QWidget):
             center_y = (image.shape[0] - 1.0) / 2.0
         self.ax.axvline(center_x, color="white", linewidth=0.8, alpha=0.9)
         self.ax.axhline(center_y, color="white", linewidth=0.8, alpha=0.9)
-        self.ax.set_title(f"Frame {self.frame_index} - {image.shape[1]} x {image.shape[0]}")
         self.ax.set_axis_off()
+        self.apply_preview_zoom(image.shape)
         self.figure.tight_layout()
         self.canvas.draw_idle()
+
+    def eventFilter(self, obj, event):
+        if obj is self.canvas and self.current_frame is not None:
+            if event.type() == QEvent.Gesture:
+                gesture = event.gesture(Qt.PinchGesture)
+                if gesture is not None:
+                    scale = gesture.scaleFactor()
+                    last_scale = gesture.lastScaleFactor()
+                    if last_scale > 0:
+                        scale = scale / last_scale
+                    if scale > 0:
+                        self.zoom_preview_at(self.pinch_gesture_position(gesture), 1.0 / scale)
+                    return True
+            if event.type() == QEvent.Wheel:
+                delta = event.pixelDelta()
+                if delta.isNull():
+                    angle_delta = event.angleDelta()
+                    delta_x = angle_delta.x() / 8.0
+                    delta_y = angle_delta.y() / 8.0
+                else:
+                    delta_x = delta.x()
+                    delta_y = delta.y()
+                if delta_x or delta_y:
+                    self.pan_preview_by(delta_x, delta_y)
+                    return True
+        return super().eventFilter(obj, event)
+
+    def zoom_preview_at(self, qt_position, scale):
+        if self.current_frame is None:
+            return
+        image_shape = np.asarray(self.current_frame).shape
+        if len(image_shape) < 2:
+            return
+
+        self.apply_preview_zoom(image_shape)
+        if self.preview_xlim is None or self.preview_ylim is None:
+            xlim, ylim = self.full_preview_limits(image_shape)
+        else:
+            xlim, ylim = self.preview_xlim, self.preview_ylim
+
+        x_data, y_data = self.preview_data_position(qt_position)
+        if not np.isfinite(x_data) or not np.isfinite(y_data):
+            x_data = (xlim[0] + xlim[1]) / 2.0
+            y_data = (ylim[0] + ylim[1]) / 2.0
+
+        full_xlim, full_ylim = self.full_preview_limits(image_shape)
+        full_width = abs(full_xlim[1] - full_xlim[0])
+        full_height = abs(full_ylim[1] - full_ylim[0])
+        new_width = min(full_width, abs(xlim[1] - xlim[0]) * scale)
+        new_height = min(full_height, abs(ylim[1] - ylim[0]) * scale)
+
+        if new_width >= full_width * 0.995 and new_height >= full_height * 0.995:
+            self.reset_preview_zoom(draw=False)
+            self.canvas.draw_idle()
+            return
+
+        x_fraction = 0.5 if xlim[1] == xlim[0] else (x_data - xlim[0]) / (xlim[1] - xlim[0])
+        y_fraction = 0.5 if ylim[1] == ylim[0] else (y_data - ylim[0]) / (ylim[1] - ylim[0])
+        new_xlim = (x_data - new_width * x_fraction, x_data + new_width * (1.0 - x_fraction))
+        new_ylim = (y_data - (ylim[1] - ylim[0]) / abs(ylim[1] - ylim[0]) * new_height * y_fraction,
+                    y_data + (ylim[1] - ylim[0]) / abs(ylim[1] - ylim[0]) * new_height * (1.0 - y_fraction))
+
+        self.preview_xlim = self.clamp_axis_limits(new_xlim, full_xlim)
+        self.preview_ylim = self.clamp_axis_limits(new_ylim, full_ylim)
+        self.apply_preview_zoom(image_shape)
+        self.canvas.draw_idle()
+
+    def pan_preview_by(self, delta_x, delta_y):
+        if self.current_frame is None:
+            return
+        image_shape = np.asarray(self.current_frame).shape
+        if len(image_shape) < 2:
+            return
+        self.apply_preview_zoom(image_shape)
+        if self.preview_xlim is None or self.preview_ylim is None:
+            xlim, ylim = self.full_preview_limits(image_shape)
+        else:
+            xlim, ylim = self.preview_xlim, self.preview_ylim
+
+        bbox = self.ax.bbox
+        if bbox.width <= 0 or bbox.height <= 0:
+            return
+        dx = -delta_x * abs(xlim[1] - xlim[0]) / bbox.width
+        dy = delta_y * (ylim[1] - ylim[0]) / bbox.height
+        full_xlim, full_ylim = self.full_preview_limits(image_shape)
+        self.preview_xlim = self.clamp_axis_limits((xlim[0] + dx, xlim[1] + dx), full_xlim)
+        self.preview_ylim = self.clamp_axis_limits((ylim[0] + dy, ylim[1] + dy), full_ylim)
+        self.apply_preview_zoom(image_shape)
+        self.canvas.draw_idle()
+
+    def preview_data_position(self, qt_position):
+        x = qt_position.x()
+        y = self.canvas.height() - qt_position.y()
+        return self.ax.transData.inverted().transform((x, y))
+
+    def pinch_gesture_position(self, gesture):
+        try:
+            return gesture.centerPoint()
+        except Exception:
+            pass
+        try:
+            return self.canvas.mapFromGlobal(gesture.hotSpot().toPoint())
+        except Exception:
+            return self.canvas.rect().center()
+
+    def full_preview_limits(self, image_shape):
+        height, width = image_shape[:2]
+        return (-0.5, width - 0.5), (height - 0.5, -0.5)
+
+    def apply_preview_zoom(self, image_shape):
+        if self.preview_xlim is None or self.preview_ylim is None:
+            xlim, ylim = self.full_preview_limits(image_shape)
+        else:
+            xlim = self.preview_xlim
+            ylim = self.preview_ylim
+        self.ax.set_xlim(*xlim)
+        self.ax.set_ylim(*ylim)
+
+    def reset_preview_zoom(self, draw=True):
+        self.preview_xlim = None
+        self.preview_ylim = None
+        if self.current_frame is not None:
+            self.apply_preview_zoom(np.asarray(self.current_frame).shape)
+        if draw:
+            self.canvas.draw_idle()
+
+    def clamp_axis_limits(self, limits, full_limits):
+        start, end = limits
+        full_start, full_end = full_limits
+        direction = 1.0 if full_end >= full_start else -1.0
+        width = min(abs(end - start), abs(full_end - full_start))
+        low = min(full_start, full_end)
+        high = max(full_start, full_end)
+        center = (start + end) / 2.0
+        center = min(max(center, low + width / 2.0), high - width / 2.0)
+        return center - direction * width / 2.0, center + direction * width / 2.0
+
+    def preview_display_image(self, image):
+        finite = np.isfinite(image)
+        if np.any(finite):
+            display_image = image
+            display_finite = np.isfinite(display_image)
+            vmin, vmax = np.nanpercentile(display_image[display_finite], [0.1, 99.9])
+            if vmax <= vmin:
+                vmax = vmin + 1
+        else:
+            display_image = image
+            vmin, vmax = 0, 1
+        return display_image, vmin, vmax
 
     def choose_output_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Choose EDF output folder", self.output_edit.text())
@@ -519,17 +1287,17 @@ class VimbaSALSWidget(QWidget):
 
     def edf_header(self, image, timestamp):
         ny, nx = image.shape[:2]
-        center_x = self.center_x_edit.text().strip()
-        center_y = self.center_y_edit.text().strip()
         distance_m = self.optional_float(self.distance_edit.text())
         pixel_x_m = self.optional_float(self.pixel_x_edit.text())
         pixel_y_m = self.optional_float(self.pixel_y_edit.text())
         wavelength_m = self.optional_float(self.wavelength_edit.text())
+        center_x = self.optional_float(self.center_x_edit.text())
+        center_y = self.optional_float(self.center_y_edit.text())
         header = {
             "HeaderID": "EH:000001:000000:000000",
             "Image": str(self.frame_index),
             "ByteOrder": "LowByteFirst",
-            "DataType": str(image.dtype),
+            "DataType": self.edf_data_type(image),
             "Dim_1": str(nx),
             "Dim_2": str(ny),
             "Camera": f"Allied Vision {self.CAMERA_MODEL}",
@@ -544,21 +1312,40 @@ class VimbaSALSWidget(QWidget):
             "Gain": self.gain_edit.text().strip(),
             "LRPhotonModule": "VimbaSALS",
             "LineGeometry": self.current_geometry_name,
-            "SampleDistance": "" if distance_m is None else f"{distance_m:.10g}",
-            "PSize_1": "" if pixel_x_m is None else f"{pixel_x_m:.10g}",
-            "PSize_2": "" if pixel_y_m is None else f"{pixel_y_m:.10g}",
-            "WaveLength": "" if wavelength_m is None else f"{wavelength_m:.10g}",
-            "SALS_Distance_m": self.distance_edit.text().strip(),
-            "SALS_PixelX_m": self.pixel_x_edit.text().strip(),
-            "SALS_PixelY_m": self.pixel_y_edit.text().strip(),
-            "SALS_Wavelength_m": self.wavelength_edit.text().strip(),
-            "Center_1": center_x,
-            "Center_2": center_y,
-            "Offset_1": self.DEFAULT_OFFSET_X,
-            "Offset_2": self.DEFAULT_OFFSET_Y,
-            "YReversed": "1",
+            "SampleDistance": self.format_header_number(distance_m),
+            "PSize_1": self.format_header_number(pixel_x_m),
+            "PSize_2": self.format_header_number(pixel_y_m),
+            "Wavelength": self.format_header_number(wavelength_m),
+            "Center_1": self.format_header_number(center_x),
+            "Center_2": self.format_header_number(center_y),
+            "YReversed": "1" if self.reverse_y_checkbox.isChecked() else "0",
         }
         return {key: value for key, value in header.items() if value not in {None, ""}}
+
+    def edf_data_type(self, image):
+        dtype = np.asarray(image).dtype
+        if dtype == np.dtype("uint16"):
+            return "UnsignedShort"
+        if dtype == np.dtype("int16"):
+            return "SignedShort"
+        if dtype == np.dtype("uint32"):
+            return "UnsignedInteger"
+        if dtype == np.dtype("int32"):
+            return "SignedInteger"
+        if dtype == np.dtype("uint8"):
+            return "UnsignedByte"
+        if dtype == np.dtype("int8"):
+            return "SignedByte"
+        if dtype == np.dtype("float32"):
+            return "FloatValue"
+        if dtype == np.dtype("float64"):
+            return "DoubleValue"
+        return str(dtype)
+
+    def format_header_number(self, value):
+        if value is None:
+            return ""
+        return f"{value:.12g}"
 
     def optional_float(self, text):
         text = str(text).strip().replace(",", ".")
@@ -578,9 +1365,22 @@ class VimbaSALSWidget(QWidget):
     def default_center_text(self, size):
         return default_center_text(size)
 
-    def disconnect_camera(self):
+    def shutdown_camera(self):
+        self.is_closing = True
+        self.disconnect_camera(closing=True)
+
+    def disconnect_camera(self, closing=False):
+        if closing:
+            self.is_closing = True
         self.live_timer.stop()
+        if closing:
+            try:
+                self.live_timer.timeout.disconnect(self.grab_live_frame)
+            except (RuntimeError, TypeError):
+                pass
+            QApplication.processEvents()
         if self.camera is not None:
+            self.stop_camera_acquisition()
             try:
                 self.camera.__exit__(None, None, None)
             except Exception:
@@ -592,8 +1392,23 @@ class VimbaSALSWidget(QWidget):
             except Exception:
                 pass
             self.vmb = None
-        self.update_connection_state(False)
+        if not closing:
+            self.update_connection_state(False)
+
+    def stop_camera_acquisition(self):
+        if self.camera is None:
+            return
+        try:
+            if self.camera.is_streaming():
+                self.camera.stop_streaming()
+        except Exception:
+            pass
+        try:
+            feature = self.camera.get_feature_by_name("AcquisitionStop")
+            feature.run()
+        except Exception:
+            pass
 
     def closeEvent(self, event):
-        self.disconnect_camera()
+        self.shutdown_camera()
         super().closeEvent(event)
