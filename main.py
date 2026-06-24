@@ -422,17 +422,16 @@ class MainWindow(QMainWindow):
 
         self.report_button = QPushButton("💬")
         self.report_button.setFixedHeight(28)
-        self.report_button.setFixedWidth(34)
+        self.report_button.setFixedWidth(28)
         self.report_button.setToolTip("Send a feedback")
         self.report_button.setCursor(Qt.PointingHandCursor)
         self.report_button.setStyleSheet("""
             QPushButton {
-                font-size: 11px;
-                color: #444444;
-                padding: 4px 10px;
-                border-radius: 8px;
-                border: 1px solid #dddddd;
-                background: #f8f8f8;
+                font-size: 16px;
+                padding: 0px;
+                border: 0px;
+                border-radius: 6px;
+                background: transparent;
             }
             QPushButton:hover {
                 background: #eeeeee;

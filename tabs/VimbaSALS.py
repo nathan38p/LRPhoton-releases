@@ -1425,10 +1425,6 @@ class VimbaSALSWidget(QWidget):
             self.is_closing = True
         self.live_timer.stop()
         if closing:
-            try:
-                self.live_timer.timeout.disconnect(self.grab_live_frame)
-            except (RuntimeError, TypeError):
-                pass
             QApplication.processEvents()
         if self.camera is not None:
             self.stop_camera_acquisition()
