@@ -161,7 +161,7 @@ APP_AFFILIATION = "CNRS - Université Grenoble Alpes"
 REPORT_EMAIL = "nathan.piaget@univ-grenoble-alpes.fr"
 # update test6
 GITHUB_OWNER = "nathan38p"
-GITHUB_REPO = "LRPhoton-releases"
+GITHUB_REPO = "LRPhoton"
 GITHUB_BRANCH = "main"
 GITHUB_URL = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}"
 UPDATE_INFO_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/commits/{GITHUB_BRANCH}"
