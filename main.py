@@ -420,8 +420,10 @@ class MainWindow(QMainWindow):
         header_layout.addStretch()
         header_layout.addWidget(self.header_balance_spacer)
 
-        self.report_button = QPushButton("💬 Feedback")
+        self.report_button = QPushButton("💬")
         self.report_button.setFixedHeight(28)
+        self.report_button.setFixedWidth(34)
+        self.report_button.setToolTip("Send a feedback")
         self.report_button.setCursor(Qt.PointingHandCursor)
         self.report_button.setStyleSheet("""
             QPushButton {

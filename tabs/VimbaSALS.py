@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHeaderView,
     QHBoxLayout,
@@ -234,28 +235,29 @@ class VimbaSALSWidget(QWidget):
         self.fps_spinbox.setValue(self.DEFAULT_PREVIEW_FPS)
         self.reverse_y_checkbox = QCheckBox("Reverse Y")
         self.reverse_y_checkbox.setChecked(self.DEFAULT_REVERSE_Y)
+        self.style_acquisition_fields()
 
-        camera_form = QFormLayout()
+        camera_form = QGridLayout()
         camera_form.setContentsMargins(0, 0, 0, 0)
-        camera_form.setSpacing(6)
-        camera_form.addRow("Exposure (µs)", self.exposure_edit)
-        roi_x_layout = QHBoxLayout()
-        roi_x_layout.setContentsMargins(0, 0, 0, 0)
-        roi_x_layout.setSpacing(4)
-        roi_x_layout.addWidget(self.width_spinbox, 1)
-        roi_x_layout.addWidget(QLabel("Offset X"))
-        roi_x_layout.addWidget(self.offset_x_spinbox, 1)
-        camera_form.addRow("Width", roi_x_layout)
-        roi_y_layout = QHBoxLayout()
-        roi_y_layout.setContentsMargins(0, 0, 0, 0)
-        roi_y_layout.setSpacing(4)
-        roi_y_layout.addWidget(self.height_spinbox, 1)
-        roi_y_layout.addWidget(QLabel("Offset Y"))
-        roi_y_layout.addWidget(self.offset_y_spinbox, 1)
-        camera_form.addRow("Height", roi_y_layout)
-        camera_form.addRow("Pixel format", self.pixel_format_combo)
-        camera_form.addRow("Preview fps", self.fps_spinbox)
-        camera_form.addRow("", self.reverse_y_checkbox)
+        camera_form.setHorizontalSpacing(6)
+        camera_form.setVerticalSpacing(6)
+        camera_form.setColumnStretch(1, 1)
+        camera_form.setColumnStretch(3, 1)
+        camera_form.addWidget(QLabel("Exposure (µs)"), 0, 0)
+        camera_form.addWidget(self.exposure_edit, 0, 1, 1, 3)
+        camera_form.addWidget(QLabel("Width"), 1, 0)
+        camera_form.addWidget(self.width_spinbox, 1, 1)
+        camera_form.addWidget(QLabel("Offset X"), 1, 2)
+        camera_form.addWidget(self.offset_x_spinbox, 1, 3)
+        camera_form.addWidget(QLabel("Height"), 2, 0)
+        camera_form.addWidget(self.height_spinbox, 2, 1)
+        camera_form.addWidget(QLabel("Offset Y"), 2, 2)
+        camera_form.addWidget(self.offset_y_spinbox, 2, 3)
+        camera_form.addWidget(QLabel("Pixel format"), 3, 0)
+        camera_form.addWidget(self.pixel_format_combo, 3, 1, 1, 3)
+        camera_form.addWidget(QLabel("Preview fps"), 4, 0)
+        camera_form.addWidget(self.fps_spinbox, 4, 1)
+        camera_form.addWidget(self.reverse_y_checkbox, 5, 1, 1, 3)
         controls_layout.addLayout(camera_form)
 
         camera_buttons_layout = QHBoxLayout()
@@ -289,9 +291,11 @@ class VimbaSALSWidget(QWidget):
 
         sals_box = QGroupBox("EDF SALS parameters")
         sals_box.setStyleSheet(GROUP_BOX_STYLE)
-        sals_layout = QFormLayout(sals_box)
+        sals_layout = QGridLayout(sals_box)
         sals_layout.setContentsMargins(8, 14, 8, 6)
-        sals_layout.setSpacing(5)
+        sals_layout.setHorizontalSpacing(6)
+        sals_layout.setVerticalSpacing(6)
+        sals_layout.setColumnStretch(1, 1)
         controls_layout.addWidget(sals_box)
 
         self.geometry_selector = LineGeometrySelector(self, "SALS default")
@@ -310,13 +314,14 @@ class VimbaSALSWidget(QWidget):
         self.pixel_x_edit.setPlaceholderText("m")
         self.pixel_y_edit.setPlaceholderText("m")
         self.wavelength_edit.setPlaceholderText("m")
-        sals_layout.addRow("Ligne", self.geometry_selector)
-        sals_layout.addRow("Distance (m)", self.distance_edit)
-        sals_layout.addRow("Pixel X (m)", self.pixel_x_edit)
-        sals_layout.addRow("Pixel Y (m)", self.pixel_y_edit)
-        sals_layout.addRow("Wavelength (m)", self.wavelength_edit)
-        sals_layout.addRow("Center X", self.center_x_edit)
-        sals_layout.addRow("Center Y", self.center_y_edit)
+        self.style_sals_fields()
+        self.add_labeled_field(sals_layout, 0, "Ligne", self.geometry_selector)
+        self.add_labeled_field(sals_layout, 1, "Distance (m)", self.distance_edit)
+        self.add_labeled_field(sals_layout, 2, "Pixel X (m)", self.pixel_x_edit)
+        self.add_labeled_field(sals_layout, 3, "Pixel Y (m)", self.pixel_y_edit)
+        self.add_labeled_field(sals_layout, 4, "Wavelength (m)", self.wavelength_edit)
+        self.add_labeled_field(sals_layout, 5, "Center X", self.center_x_edit)
+        self.add_labeled_field(sals_layout, 6, "Center Y", self.center_y_edit)
         self.apply_line_geometry(self.geometry_selector.current_name, self.geometry_selector.current_geometry())
 
         controls_layout.addStretch(1)
@@ -342,6 +347,52 @@ class VimbaSALSWidget(QWidget):
         self.status_label.setMinimumHeight(22)
         self.status_label.setWordWrap(True)
         preview_layout.addWidget(self.status_label, 0)
+
+    def style_acquisition_fields(self):
+        for widget in [
+            self.exposure_edit,
+            self.width_spinbox,
+            self.height_spinbox,
+            self.offset_x_spinbox,
+            self.offset_y_spinbox,
+            self.fps_spinbox,
+        ]:
+            widget.setFixedHeight(26)
+        for widget in [
+            self.width_spinbox,
+            self.height_spinbox,
+            self.offset_x_spinbox,
+            self.offset_y_spinbox,
+            self.fps_spinbox,
+        ]:
+            widget.setMinimumWidth(70)
+        self.pixel_format_combo.setFixedHeight(30)
+        self.reverse_y_checkbox.setMinimumHeight(26)
+
+    def style_sals_fields(self):
+        for widget in [
+            self.distance_edit,
+            self.pixel_x_edit,
+            self.pixel_y_edit,
+            self.wavelength_edit,
+            self.center_x_edit,
+            self.center_y_edit,
+        ]:
+            widget.setFixedHeight(28)
+            widget.setMinimumWidth(0)
+        self.geometry_selector.setMinimumWidth(0)
+        self.geometry_selector.setFixedHeight(30)
+        self.geometry_selector.combo.setMinimumWidth(0)
+        self.geometry_selector.combo.setFixedHeight(30)
+        self.geometry_selector.edit_button.setFixedHeight(30)
+        self.geometry_selector.edit_button.setFixedWidth(54)
+
+    def add_labeled_field(self, layout, row, label_text, widget):
+        label = QLabel(label_text)
+        label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        label.setMinimumWidth(100)
+        layout.addWidget(label, row, 0)
+        layout.addWidget(widget, row, 1)
 
     def update_connection_state(self, connected):
         self.connect_button.setEnabled(not connected)
