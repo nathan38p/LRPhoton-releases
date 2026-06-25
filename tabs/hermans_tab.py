@@ -2127,8 +2127,8 @@ class HermansTab(QWidget):
             x = header_float(header, CENTER_X_KEYS, ID02_DEFAULT_CENTER_X)
             y = header_float(header, CENTER_Y_KEYS, ID02_DEFAULT_CENTER_Y)
         elif self.instrument_mode == "ID13":
-            x = ID13_DEFAULT_CENTER_X
-            y = ID13_DEFAULT_CENTER_Y
+            x = header_float(header, CENTER_X_KEYS, ID13_DEFAULT_CENTER_X)
+            y = header_float(header, CENTER_Y_KEYS, ID13_DEFAULT_CENTER_Y)
         else:
             x = self.center_x_spin.value() if self.center_x_spin.value() != 0 else header_float(header, CENTER_X_KEYS, nx / 2)
             y = self.center_y_spin.value() if self.center_y_spin.value() != 0 else header_float(header, CENTER_Y_KEYS, ny / 2)
@@ -2144,12 +2144,16 @@ class HermansTab(QWidget):
             geometry = dict(self.custom_anisotropy_geometry)
         elif self.instrument_mode == "ID13":
             geometry = {
-                "center_x": ID13_DEFAULT_CENTER_X,
-                "center_y": ID13_DEFAULT_CENTER_Y,
-                "distance": ID13_DEFAULT_DISTANCE_M,
-                "pixel_x": ID13_DEFAULT_PIXEL_MM,
-                "pixel_y": ID13_DEFAULT_PIXEL_MM,
-                "wavelength": ID13_DEFAULT_WAVELENGTH_A,
+                "center_x": header_float(header, CENTER_X_KEYS, ID13_DEFAULT_CENTER_X),
+                "center_y": header_float(header, CENTER_Y_KEYS, ID13_DEFAULT_CENTER_Y),
+                "distance": header_float(
+                    header,
+                    ["SampleDistance", "sampledistance", "sample_distance", "Distance", "DetectorDistance"],
+                    ID13_DEFAULT_DISTANCE_M,
+                ),
+                "pixel_x": header_float(header, ["PSize_1", "psize_1", "PixelSizeX", "pixel_x"], ID13_DEFAULT_PIXEL_MM),
+                "pixel_y": header_float(header, ["PSize_2", "psize_2", "PixelSizeY", "pixel_y"], ID13_DEFAULT_PIXEL_MM),
+                "wavelength": header_float(header, ["WaveLength", "Wavelength", "wavelength"], ID13_DEFAULT_WAVELENGTH_A),
             }
         else:
             if self.instrument_mode == "ID02":
@@ -2175,7 +2179,7 @@ class HermansTab(QWidget):
                 ),
                 "pixel_x": header_float(header, ["PSize_1", "psize_1", "PixelSizeX", "pixel_x"], default_pixel),
                 "pixel_y": header_float(header, ["PSize_2", "psize_2", "PixelSizeY", "pixel_y"], default_pixel),
-                "wavelength": header_float(header, ["Wavelength", "wavelength"], default_wavelength),
+                "wavelength": header_float(header, ["WaveLength", "Wavelength", "wavelength"], default_wavelength),
             }
 
         if self.center_x_spin.value() != 0:

@@ -230,13 +230,16 @@ def _legend_store_path():
 
 class CurveTableWidget(QTableWidget):
     """Custom table widget with better drag-drop handling for curves."""
+    CURVE_KEY_MIME = "application/x-lrphoton-curve-key"
     
     def __init__(self, rows, cols, parent=None):
         super().__init__(rows, cols, parent)
         self._drag_row = None
+        self._drag_key = None
         # Enable drag-drop
         self.setDragDropMode(QAbstractItemView.InternalMove)
         self.setDragDropOverwriteMode(False)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
     
@@ -245,39 +248,81 @@ class CurveTableWidget(QTableWidget):
         index = self.indexAt(event.pos())
         if index.isValid():
             self._drag_row = index.row()
+            self._drag_key = self.curve_key_for_row(index.row())
         super().mousePressEvent(event)
+
+    def curve_key_for_row(self, row):
+        key_item = self.item(row, 1)
+        return key_item.text() if key_item is not None else None
+
+    def mimeData(self, items):
+        mime_data = QMimeData()
+        rows = sorted({item.row() for item in items if item is not None})
+        if rows:
+            curve_key = self.curve_key_for_row(rows[0])
+            if curve_key:
+                mime_data.setData(self.CURVE_KEY_MIME, curve_key.encode("utf-8"))
+        return mime_data
+
+    def startDrag(self, supported_actions):
+        if self._drag_key is None:
+            selected_rows = self.selectionModel().selectedRows()
+            if selected_rows:
+                self._drag_row = selected_rows[0].row()
+                self._drag_key = self.curve_key_for_row(self._drag_row)
+        if not self._drag_key:
+            return
+
+        mime_data = QMimeData()
+        mime_data.setData(self.CURVE_KEY_MIME, self._drag_key.encode("utf-8"))
+        drag = QDrag(self)
+        drag.setMimeData(mime_data)
+        drag.exec(Qt.DropAction.MoveAction)
+
+    def dragEnterEvent(self, event):
+        if event.source() is self and event.mimeData().hasFormat(self.CURVE_KEY_MIME):
+            event.setDropAction(Qt.DropAction.MoveAction)
+            event.accept()
+        else:
+            super().dragEnterEvent(event)
     
     def dragMoveEvent(self, event):
         """Allow drop on rows."""
-        if event.source() is self:
+        if event.source() is self and event.mimeData().hasFormat(self.CURVE_KEY_MIME):
             event.setDropAction(Qt.DropAction.MoveAction)
             event.accept()
         else:
             super().dragMoveEvent(event)
+
+    def drop_destination_row(self, event):
+        row = self.indexAt(event.position().toPoint()).row()
+        indicator = self.dropIndicatorPosition()
+        if row < 0 or indicator == QAbstractItemView.DropIndicatorPosition.OnViewport:
+            return self.rowCount()
+        if indicator == QAbstractItemView.DropIndicatorPosition.BelowItem:
+            return row + 1
+        return row
     
     def dropEvent(self, event):
         """Move the underlying curve row instead of relying on QTableWidget internals."""
-        if event.source() is self:
+        if event.source() is self and event.mimeData().hasFormat(self.CURVE_KEY_MIME):
             parent_tab = self.parent()
             while parent_tab and not hasattr(parent_tab, 'refresh_curve_table'):
                 parent_tab = parent_tab.parent()
 
-            drop_row = self.indexAt(event.position().toPoint()).row()
-            if drop_row < 0:
-                drop_row = self.rowCount()
-            elif self._drag_row is not None:
-                rect = self.visualRect(self.model().index(drop_row, 0))
-                if event.position().toPoint().y() > rect.center().y():
-                    drop_row += 1
+            source_key = bytes(event.mimeData().data(self.CURVE_KEY_MIME)).decode("utf-8")
+            drop_row = self.drop_destination_row(event)
 
-            if parent_tab and hasattr(parent_tab, "move_curve_row") and self._drag_row is not None:
-                parent_tab.move_curve_row(self._drag_row, drop_row)
+            if parent_tab and hasattr(parent_tab, "move_curve_key") and source_key:
+                parent_tab.move_curve_key(source_key, drop_row)
                 event.setDropAction(Qt.DropAction.MoveAction)
                 event.accept()
                 self._drag_row = None
+                self._drag_key = None
                 return
 
             self._drag_row = None
+            self._drag_key = None
             event.ignore()
         else:
             super().dropEvent(event)
@@ -1539,17 +1584,14 @@ class DatPlotTab(QWidget):
 
             for curve_index, loaded_curve in enumerate(loaded_curves):
                 base_key = file_path.name if len(loaded_curves) == 1 else f"{file_path.name}:{loaded_curve['legend']}"
-                key = base_key
-                suffix = 2
-                while key in self.curves:
-                    key = f"{base_key} ({suffix})"
-                    suffix += 1
+                if base_key in self.curves:
+                    continue
 
                 index = len(self.curves)
                 saved_legend = self.saved_legend_for_file(file_path) if len(loaded_curves) == 1 else None
                 legend = saved_legend or loaded_curve.get("legend") or file_path.stem
                 y = np.asarray(loaded_curve["y"], dtype=float)
-                self.curves[key] = {
+                self.curves[base_key] = {
                     "path": file_path,
                     "x": np.asarray(loaded_curve["x"], dtype=float),
                     "y": y,
@@ -1563,15 +1605,48 @@ class DatPlotTab(QWidget):
                     "visible": True,
                 }
 
+        self.remove_duplicate_curves()
         self.refresh_curve_table()
         self.apply_default_plot_mode()
         self.update_plot()
 
+    def remove_duplicate_curves(self):
+        seen = set()
+        deduplicated = {}
+        for key, curve in self.curves.items():
+            base_key = key
+            marker_index = key.rfind(" (")
+            if key.endswith(")") and marker_index != -1:
+                suffix = key[marker_index + 2:-1]
+                if suffix.isdigit():
+                    base_key = key[:marker_index]
+
+            path = curve.get("path")
+            try:
+                path_key = Path(path).resolve() if path is not None else None
+            except OSError:
+                path_key = Path(path) if path is not None else None
+            identity = (path_key, base_key)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            deduplicated[base_key if base_key not in deduplicated else key] = curve
+        self.curves = deduplicated
+
     def selected_files(self):
         files = []
+        seen_paths = set()
         for item in self.file_list.selectedItems():
             stored_path = item.data(Qt.UserRole)
-            files.append(Path(stored_path) if stored_path else self.current_folder / item.text())
+            file_path = Path(stored_path) if stored_path else self.current_folder / item.text()
+            try:
+                key = file_path.resolve()
+            except OSError:
+                key = file_path
+            if key in seen_paths:
+                continue
+            seen_paths.add(key)
+            files.append(file_path)
         return files
 
     def update_clear_header_button_position(self):
@@ -2419,15 +2494,22 @@ class DatPlotTab(QWidget):
             line.set_gid(key)
 
     def move_curve_row(self, source_row, destination_row):
+        keys = list(self.curves.keys())
+        if not 0 <= source_row < len(keys):
+            return
+        self.move_curve_key(keys[source_row], destination_row)
+
+    def move_curve_key(self, source_key, destination_row):
         previous_xlim = self.canvas.ax.get_xlim()
         previous_ylim = self.canvas.ax.get_ylim()
         previous_xscale = self.canvas.ax.get_xscale()
         previous_yscale = self.canvas.ax.get_yscale()
 
         keys = list(self.curves.keys())
-        if not 0 <= source_row < len(keys):
+        if source_key not in keys:
             return
 
+        source_row = keys.index(source_key)
         destination_row = max(0, min(destination_row, len(keys)))
         key = keys.pop(source_row)
         if destination_row > source_row:

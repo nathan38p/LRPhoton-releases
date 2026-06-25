@@ -2293,16 +2293,8 @@ class ViewTab(QWidget):
 
         geometry = dict(geometry)
         header_values = self.get_header_q_values()
-        has_complete_header_geometry = all(
-            key in header_values
-            for key in ("xc", "yc", "distance_m", "pixel_x_mm", "pixel_y_mm", "wavelength_a")
-        )
-        if self.q_geometry_mode != "Custom" and has_complete_header_geometry:
+        if header_values:
             geometry.update(header_values)
-        elif self.q_geometry_mode == "Custom" and has_complete_header_geometry:
-            for key, value in header_values.items():
-                if geometry.get(key) in (None, 0):
-                    geometry[key] = value
 
         return geometry
 

@@ -261,7 +261,8 @@ def _plot_lines_for_legend_label(ax, label):
 
 
 def _set_legend_selection(ax, selected_label):
-    selected_lines = _plot_lines_for_legend_label(ax, selected_label)
+    ax.__dict__["_lrphoton_selected_legend_label"] = selected_label
+    selected_lines = _plot_lines_for_legend_label(ax, selected_label) if selected_label else []
     selected_ids = {id(line) for line in selected_lines}
     selected_gids = {line.get_gid() for line in selected_lines if line.get_gid() is not None}
 
@@ -330,7 +331,8 @@ def install_selectable_legend(ax, legend):
             target_ax = legend.__dict__.get("_lrphoton_axes")
             if target_ax is None:
                 target_ax = legend.axes
-            _set_legend_selection(target_ax, label)
+            selected_label = target_ax.__dict__.get("_lrphoton_selected_legend_label")
+            _set_legend_selection(target_ax, None if selected_label == label else label)
             event.canvas.draw_idle()
 
         canvas.mpl_connect("pick_event", handle_pick)

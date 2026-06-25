@@ -1681,10 +1681,10 @@ class AzimuthalTab(QWidget):
         if self.instrument_mode == "XENOCS":
             cx = get_header_float(header, *CENTER_X_KEYS)
             cy = get_header_float(header, *CENTER_Y_KEYS)
-            dist = get_header_float(header, "SampleDistance", "sampledistance", "sample_distance")
-            px = get_header_float(header, "PSize_1", "psize_1", "PSize_X", "PixelSizeX")
-            py = get_header_float(header, "PSize_2", "psize_2", "PSize_Y", "PixelSizeY")
-            wav = get_header_float(header, "WaveLength", "Wavelength", "wavelength")
+            dist = get_header_float(header, "SampleDistance", "sampledistance", "sample_distance", "Distance", "DetectorDistance")
+            px = get_header_float(header, "PSize_1", "psize_1", "PSize_X", "PixelSizeX", "pixel_size_x", "x_pixel_size")
+            py = get_header_float(header, "PSize_2", "psize_2", "PSize_Y", "PixelSizeY", "pixel_size_y", "y_pixel_size")
+            wav = get_header_float(header, "WaveLength", "Wavelength", "wavelength", "Lambda", "lambda")
 
             self.center_x.setValue(cx if cx is not None else 0)
             self.center_y.setValue(cy if cy is not None else 0)
@@ -1697,10 +1697,10 @@ class AzimuthalTab(QWidget):
         if self.instrument_mode == "ID02":
             cx = get_header_float(header, *CENTER_X_KEYS)
             cy = get_header_float(header, *CENTER_Y_KEYS)
-            dist = get_header_float(header, "SampleDistance", "sampledistance", "sample_distance")
-            px = get_header_float(header, "PSize_1", "psize_1", "PSize_X", "PixelSizeX")
-            py = get_header_float(header, "PSize_2", "psize_2", "PSize_Y", "PixelSizeY")
-            wav = get_header_float(header, "WaveLength", "Wavelength", "wavelength")
+            dist = get_header_float(header, "SampleDistance", "sampledistance", "sample_distance", "Distance", "DetectorDistance")
+            px = get_header_float(header, "PSize_1", "psize_1", "PSize_X", "PixelSizeX", "pixel_size_x", "x_pixel_size")
+            py = get_header_float(header, "PSize_2", "psize_2", "PSize_Y", "PixelSizeY", "pixel_size_y", "y_pixel_size")
+            wav = get_header_float(header, "WaveLength", "Wavelength", "wavelength", "Lambda", "lambda")
             self.center_x.setValue(cx if cx is not None else ID02_DEFAULT_CENTER_X)
             self.center_y.setValue(cy if cy is not None else ID02_DEFAULT_CENTER_Y)
             self.distance.setValue(dist if dist is not None else ID02_DEFAULT_DISTANCE_M)
@@ -1710,12 +1710,18 @@ class AzimuthalTab(QWidget):
             return
 
         if self.instrument_mode == "ID13":
-            self.center_x.setValue(ID13_DEFAULT_CENTER_X)
-            self.center_y.setValue(ID13_DEFAULT_CENTER_Y)
-            self.distance.setValue(ID13_DEFAULT_DISTANCE_M)
-            self.pixel_x.setValue(ID13_DEFAULT_PIXEL_MM)
-            self.pixel_y.setValue(ID13_DEFAULT_PIXEL_MM)
-            self.wavelength.setValue(ID13_DEFAULT_WAVELENGTH_A)
+            cx = get_header_float(header, *CENTER_X_KEYS)
+            cy = get_header_float(header, *CENTER_Y_KEYS)
+            dist = get_header_float(header, "SampleDistance", "sampledistance", "sample_distance", "Distance", "DetectorDistance")
+            px = get_header_float(header, "PSize_1", "psize_1", "PSize_X", "PixelSizeX", "pixel_size_x", "x_pixel_size")
+            py = get_header_float(header, "PSize_2", "psize_2", "PSize_Y", "PixelSizeY", "pixel_size_y", "y_pixel_size")
+            wav = get_header_float(header, "WaveLength", "Wavelength", "wavelength", "Lambda", "lambda")
+            self.center_x.setValue(cx if cx is not None else ID13_DEFAULT_CENTER_X)
+            self.center_y.setValue(cy if cy is not None else ID13_DEFAULT_CENTER_Y)
+            self.distance.setValue(dist if dist is not None else ID13_DEFAULT_DISTANCE_M)
+            self.pixel_x.setValue(px * 1000 if px is not None else ID13_DEFAULT_PIXEL_MM)
+            self.pixel_y.setValue(py * 1000 if py is not None else ID13_DEFAULT_PIXEL_MM)
+            self.wavelength.setValue(wav * 1e10 if wav is not None else ID13_DEFAULT_WAVELENGTH_A)
             return
 
     def azimuthal_image_q_axis(self, shape, header):

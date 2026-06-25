@@ -312,10 +312,10 @@ def get_header_float(header: dict, *names):
 def header_q_geometry_values(header: dict):
     cx = get_header_float(header, *CENTER_X_KEYS)
     cy = get_header_float(header, *CENTER_Y_KEYS)
-    dist = get_header_float(header, "SampleDistance", "sampledistance", "sample_distance")
-    px = get_header_float(header, "PSize_1", "psize_1", "PSize_X", "PixelSizeX")
-    py = get_header_float(header, "PSize_2", "psize_2", "PSize_Y", "PixelSizeY")
-    wav = get_header_float(header, "WaveLength", "Wavelength", "wavelength")
+    dist = get_header_float(header, "SampleDistance", "sampledistance", "sample_distance", "Distance", "DetectorDistance")
+    px = get_header_float(header, "PSize_1", "psize_1", "PSize_X", "PixelSizeX", "pixel_size_x", "x_pixel_size")
+    py = get_header_float(header, "PSize_2", "psize_2", "PSize_Y", "PixelSizeY", "pixel_size_y", "y_pixel_size")
+    wav = get_header_float(header, "WaveLength", "Wavelength", "wavelength", "Lambda", "lambda")
 
     values = {
         "cx": cx,
@@ -2260,7 +2260,20 @@ class RadialTab(QWidget):
             ordered_items = [current_item] + [item for item in selected_items if item is not current_item]
         else:
             ordered_items = selected_items
-        return [file_path_from_item(item, self.current_folder) for item in ordered_items]
+
+        files = []
+        seen_paths = set()
+        for item in ordered_items:
+            file_path = file_path_from_item(item, self.current_folder)
+            try:
+                key = file_path.resolve()
+            except OSError:
+                key = file_path
+            if key in seen_paths:
+                continue
+            seen_paths.add(key)
+            files.append(file_path)
+        return files
 
     def set_instrument_mode(self, mode):
         self.instrument_mode = mode
@@ -2437,12 +2450,15 @@ class RadialTab(QWidget):
             return
 
         if self.instrument_mode == "ID13":
-            self.center_x.setValue(ID13_DEFAULT_CENTER_X)
-            self.center_y.setValue(ID13_DEFAULT_CENTER_Y)
-            self.distance.setValue(ID13_DEFAULT_DISTANCE_M)
-            self.pixel_x.setValue(ID13_DEFAULT_PIXEL_MM)
-            self.pixel_y.setValue(ID13_DEFAULT_PIXEL_MM)
-            self.wavelength.setValue(ID13_DEFAULT_WAVELENGTH_A)
+            values, _ = header_q_geometry_values(header)
+            self.center_x.setValue(values["cx"] if values["cx"] is not None else ID13_DEFAULT_CENTER_X)
+            self.center_y.setValue(values["cy"] if values["cy"] is not None else ID13_DEFAULT_CENTER_Y)
+            self.distance.setValue(values["dist"] if values["dist"] is not None else ID13_DEFAULT_DISTANCE_M)
+            self.pixel_x.setValue(header_pixel_to_mm(values["px"]) if values["px"] is not None else ID13_DEFAULT_PIXEL_MM)
+            self.pixel_y.setValue(header_pixel_to_mm(values["py"]) if values["py"] is not None else ID13_DEFAULT_PIXEL_MM)
+            self.wavelength.setValue(
+                header_wavelength_to_a(values["wav"]) if values["wav"] is not None else ID13_DEFAULT_WAVELENGTH_A
+            )
             return
 
     def display_selected_file_preview(self, file_path):

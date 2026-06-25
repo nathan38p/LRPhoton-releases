@@ -147,11 +147,11 @@ def header_number(header, *keys):
 
 def header_to_line_geometry(header, fallback=None, name="XENOCS"):
     fallback = dict(fallback or {})
-    cx = header_number(header, "Center_1", "Center X", "center_x")
-    cy = header_number(header, "Center_2", "Center Y", "center_y")
-    px = header_number(header, "PSize_1", "psize_1", "PSize_X", "PixelSizeX", "pixel_x")
-    py = header_number(header, "PSize_2", "psize_2", "PSize_Y", "PixelSizeY", "pixel_y")
-    dist = header_number(header, "SampleDistance", "sampledistance", "sample_distance", "Distance", "DetectorDistance")
+    cx = header_number(header, "Center_1", "center_1", "Center X", "CenterX", "center_x", "BeamCenterX", "Beam_x", "beam_x")
+    cy = header_number(header, "Center_2", "center_2", "Center Y", "CenterY", "center_y", "BeamCenterY", "Beam_y", "beam_y")
+    px = header_number(header, "PSize_1", "psize_1", "PSize_X", "PixelSizeX", "pixel_size_x", "x_pixel_size", "pixel_x")
+    py = header_number(header, "PSize_2", "psize_2", "PSize_Y", "PixelSizeY", "pixel_size_y", "y_pixel_size", "pixel_y")
+    dist = header_number(header, "SampleDistance", "sampledistance", "sample_distance", "Distance", "DetectorDistance", "detector_distance")
     wavelength = header_number(header, "WaveLength", "Wavelength", "wavelength", "Lambda", "lambda")
 
     geometry = normalized_line_geometry({
@@ -236,12 +236,11 @@ class LineGeometrySelector(QWidget):
                     return normalized_line_geometry(geometry)
             except Exception:
                 pass
-        if name == "XENOCS":
-            parent = self.context_owner or self.parent()
-            for attr in ("headers", "current_header", "header", "current_header_for_line_geometry"):
-                header = getattr(parent, attr, None)
-                if isinstance(header, dict) and header:
-                    return header_to_line_geometry(header, base, name)
+        parent = self.context_owner or self.parent()
+        for attr in ("current_header_for_line_geometry", "headers", "current_header", "header"):
+            header = getattr(parent, attr, None)
+            if isinstance(header, dict) and header:
+                return header_to_line_geometry(header, base, name)
         return base
 
     def set_current_name(self, name):

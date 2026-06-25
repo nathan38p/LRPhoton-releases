@@ -3226,10 +3226,10 @@ class CaveTab(QWidget):
             pixel_y = ID02_DEFAULT_PIXEL_MM if pixel_y is None else pixel_y
             wavelength = ID02_DEFAULT_WAVELENGTH_A if wavelength is None else wavelength
         elif self.instrument_mode == "ID13":
-            distance_m = ID13_DEFAULT_DISTANCE_M
-            pixel_x = ID13_DEFAULT_PIXEL_MM
-            pixel_y = ID13_DEFAULT_PIXEL_MM
-            wavelength = ID13_DEFAULT_WAVELENGTH_A
+            distance_m = ID13_DEFAULT_DISTANCE_M if distance_m is None else distance_m
+            pixel_x = ID13_DEFAULT_PIXEL_MM if pixel_x is None else pixel_x
+            pixel_y = ID13_DEFAULT_PIXEL_MM if pixel_y is None else pixel_y
+            wavelength = ID13_DEFAULT_WAVELENGTH_A if wavelength is None else wavelength
 
         if distance_m is None or pixel_x is None or pixel_y is None or wavelength is None:
             return None

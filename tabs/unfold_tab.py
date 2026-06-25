@@ -192,6 +192,11 @@ class UnfoldTab(ViewTab):
         self.sync_geometry_fields()
         self.update_pattern_preview()
 
+    def apply_line_geometry_selection(self, name, geometry):
+        super().apply_line_geometry_selection(name, geometry)
+        self.sync_geometry_fields()
+        self.update_pattern_preview()
+
     def should_show_file_in_browser(self, path):
         if not super().should_show_file_in_browser(path):
             return False

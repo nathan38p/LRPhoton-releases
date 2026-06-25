@@ -248,7 +248,7 @@ class ColoredTabBar(QTabBar):
         9: ("#dcfce7", "#16a34a"),  # Radial
         10: ("#dcfce7", "#16a34a"),  # Azimuthal
         11: ("#f3e8ff", "#9333ea"),  # Anisotropy
-        12: ("#fde68a", "#d97706"),  # Sandbox
+        12: ("#e5e7eb", "#6b7280"),  # Sandbox
     }
 
     def tabSizeHint(self, index):
