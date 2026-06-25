@@ -172,8 +172,15 @@ python3 main.py
 LRPhoton was developped during Nathan Piaget's PhD at the laboratoire Rhéologie et Procédés (LRP, CNRS / Université Grenoble Alpes).
 
 <p>
-  <img src="assets/LRP.svg" alt="LRP" height="36">
-  <img src="assets/CNRS.png" alt="CNRS" height="36">
+  <a href="https://lrp.univ-grenoble-alpes.fr/">
+    <img src="assets/LRP.svg" alt="LRP" height="36">
+  </a>
+  <a href="https://www.cnrs.fr/">
+    <img src="assets/CNRS.png" alt="CNRS" height="36">
+  </a>
+  <a href="https://www.univ-grenoble-alpes.fr/">
+    <img src="assets/UGA.png" alt="Université Grenoble Alpes" height="36">
+  </a>
 </p>
 
 If LRPhoton contributes to results presented in a scientific publication, please cite the software.
