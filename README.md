@@ -8,7 +8,7 @@
 
 LRPhoton is a Python application for SAXS/WAXS data processing and visualization dedicated to laboratory and synchrotron scattering data, including XENOCS laboratory SAXS systems and ESRF beamlines ID13 and ID02.
 
-## Windows installation
+## 🪟 Windows installation
 
 1. Click the green Code button, then select Download ZIP.
 2. Extract the ZIP archive.
@@ -34,7 +34,7 @@ C:\Users\<your-user-name>\AppData\Local\Programs\LRPhoton
 
 * If the installation does not work, install Python manually and move the extracted LRPhoton folder into the directory shown above. You can create a shortcut on your Desktop.
 
-## MacOS Installation
+## 🍎 MacOS Installation
 
 1. Install Python 3.14.5 from: https://www.python.org/downloads/
 2. Click the green Code button, then select Download ZIP.
@@ -58,13 +58,13 @@ The macOS installer will:
 
 The LRPhoton files stay in `/Applications/LRPhoton`.
 
-## Update system
+## 🛠️ Update system
 
 Development is ongoing, new features, improvements and bug fixes are added regularly.
 
 At startup, LRPhoton automatically checks for updates from the GitHub repository and downloads modified internal files when a newer version is available.
 
-## Troubleshooting
+## 🧰 Troubleshooting
 
 If LRPhoton does not open, closes immediately, or prints an error such as `ModuleNotFoundError: No module named ...`, install the Python dependencies manually from a terminal.
 
@@ -167,7 +167,7 @@ python3 main.py
 ```
 
 
-## Credits
+## ℹ️ Credits
 
 <p align="center">
   <a href="https://lrp.univ-grenoble-alpes.fr/"><img src="assets/LRP.svg" alt="LRP" height="44"></a>
@@ -177,6 +177,6 @@ python3 main.py
   <a href="https://www.univ-grenoble-alpes.fr/"><img src="assets/UGA.png" alt="Université Grenoble Alpes" height="44"></a>
 </p>
 
-LRPhoton was developped during Nathan Piaget's PhD at the laboratoire Rhéologie et Procédés (LRP, UMR 5520, CNRS / Université Grenoble Alpes).
+LRPhoton was developped during Nathan Piaget's PhD at the Laboratoire Rhéologie et Procédés (LRP, UMR 5520, CNRS / Université Grenoble Alpes).
 
 If LRPhoton contributes to results presented in a scientific publication, please cite the software.
