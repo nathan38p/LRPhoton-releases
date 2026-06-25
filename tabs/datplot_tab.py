@@ -66,6 +66,12 @@ from .ui_style import (
 
 
 PLOT_Y_AXES = ("left", "left2", "right", "right2")
+PLOT_Y_AXIS_LABELS = {
+    "left": "L1",
+    "left2": "L2",
+    "right": "R1",
+    "right2": "R2",
+}
 PLOT_TRANSFORMED_MODES = {
     "Kratky (q²I(q))": {"power": 2, "x_power": 1, "x_label": "q", "y_label": "q²I(q)"},
     "qI(q)": {"power": 1, "x_power": 1, "x_label": "q", "y_label": "qI(q)"},
@@ -209,7 +215,12 @@ def read_dat_curves(file_path):
 
 def normalize_plot_axis(value):
     axis = str(value or "left").strip().lower()
+    axis = {"l1": "left", "l2": "left2", "r1": "right", "r2": "right2"}.get(axis, axis)
     return axis if axis in PLOT_Y_AXES else "left"
+
+
+def plot_axis_label(axis):
+    return PLOT_Y_AXIS_LABELS.get(normalize_plot_axis(axis), "L1")
 
 
 def default_color(index):
@@ -793,7 +804,7 @@ class DatPlotTab(QWidget):
         self.curve_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Fixed)
         self.curve_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Fixed)
         self.curve_table.setColumnWidth(0, 28)
-        self.curve_table.setColumnWidth(3, 58)
+        self.curve_table.setColumnWidth(3, 42)
         self.curve_table.setColumnWidth(4, 44)
         self.curve_table.setColumnWidth(5, 30)
         self.curve_table.verticalHeader().setVisible(False)
@@ -823,7 +834,7 @@ class DatPlotTab(QWidget):
         mask_buttons_layout.addWidget(self.reset_masks_button)
         curve_layout.addLayout(mask_buttons_layout)
 
-        guide_box = QGroupBox("Dashed bars")
+        guide_box = QGroupBox("Annotations")
         self.style_top_group_box(guide_box)
         guide_layout = QVBoxLayout(guide_box)
         guide_layout.setContentsMargins(*GROUP_BOX_MARGINS)
@@ -833,12 +844,11 @@ class DatPlotTab(QWidget):
         self.guide_table = QTableWidget(0, 4)
         self.guide_table.setMinimumHeight(96)
         self.guide_table.setMaximumHeight(150)
-        self.guide_table.setHorizontalHeaderLabels(["Axis", "Value", "Color", ""])
-        self.guide_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
+        self.guide_table.setHorizontalHeaderLabels(["Value", "Name", "Color", ""])
+        self.guide_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.guide_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.guide_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)
         self.guide_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Fixed)
-        self.guide_table.setColumnWidth(0, 42)
         self.guide_table.setColumnWidth(2, 44)
         self.guide_table.setColumnWidth(3, 30)
         self.guide_table.verticalHeader().setVisible(False)
@@ -859,23 +869,14 @@ class DatPlotTab(QWidget):
         self.add_y_bar_button = QPushButton("+ Y")
         self.add_y_bar_button.setToolTip("Add a horizontal dashed bar")
         self.add_y_bar_button.clicked.connect(lambda: self.add_guide_bar("y"))
-        guide_buttons_layout.addWidget(self.add_x_bar_button)
-        guide_buttons_layout.addWidget(self.add_y_bar_button)
-        guide_layout.addLayout(guide_buttons_layout)
-
-        axis_label_layout = QHBoxLayout()
-        axis_label_layout.setContentsMargins(0, 0, 0, 0)
-        axis_label_layout.setSpacing(4)
         self.add_axis_label_button = QPushButton("+ Peak label")
         self.add_axis_label_button.setToolTip("Click a peak, enter a label name. Reuse the same name to add another arrow to the same label.")
         self.add_axis_label_button.setCheckable(True)
         self.add_axis_label_button.clicked.connect(self.toggle_peak_label_mode)
-        self.clear_axis_labels_button = QPushButton("Clear labels")
-        self.clear_axis_labels_button.setToolTip("Remove all peak labels")
-        self.clear_axis_labels_button.clicked.connect(self.clear_peak_labels)
-        axis_label_layout.addWidget(self.add_axis_label_button)
-        axis_label_layout.addWidget(self.clear_axis_labels_button)
-        guide_layout.addLayout(axis_label_layout)
+        guide_buttons_layout.addWidget(self.add_x_bar_button)
+        guide_buttons_layout.addWidget(self.add_y_bar_button)
+        guide_buttons_layout.addWidget(self.add_axis_label_button)
+        guide_layout.addLayout(guide_buttons_layout)
 
         self.clear_header_button = QPushButton("−", self.curve_table.horizontalHeader())
         self.clear_header_button.setFixedSize(22, 18)
@@ -897,6 +898,27 @@ class DatPlotTab(QWidget):
         """)
         self.curve_table.horizontalHeader().sectionResized.connect(self.update_clear_header_button_position)
         self.update_clear_header_button_position()
+
+        self.clear_annotations_header_button = QPushButton("−", self.guide_table.horizontalHeader())
+        self.clear_annotations_header_button.setFixedSize(22, 18)
+        self.clear_annotations_header_button.setToolTip("Clear all annotations")
+        self.clear_annotations_header_button.clicked.connect(self.clear_annotations)
+        self.clear_annotations_header_button.setStyleSheet("""
+            QPushButton {
+                background: #ffecec;
+                color: #b00020;
+                border: 1px solid #ffb3b3;
+                border-radius: 8px;
+                font-weight: bold;
+                font-size: 11px;
+                padding: 0px;
+            }
+            QPushButton:hover {
+                background: #ffd6d6;
+            }
+        """)
+        self.guide_table.horizontalHeader().sectionResized.connect(self.update_clear_annotations_header_button_position)
+        self.update_clear_annotations_header_button_position()
 
 
         self.canvas = PlotCanvas()
@@ -1661,6 +1683,18 @@ class DatPlotTab(QWidget):
         )
         self.clear_header_button.raise_()
 
+    def update_clear_annotations_header_button_position(self):
+        header = self.guide_table.horizontalHeader()
+        column = 3
+        x = header.sectionViewportPosition(column)
+        width = header.sectionSize(column)
+        y = max(0, (header.height() - self.clear_annotations_header_button.height()) // 2)
+        self.clear_annotations_header_button.move(
+            x + max(0, (width - self.clear_annotations_header_button.width()) // 2),
+            y,
+        )
+        self.clear_annotations_header_button.raise_()
+
     def refresh_curve_table(self):
         self._refreshing_curve_table = True
         self.curve_table.blockSignals(True)
@@ -1701,10 +1735,43 @@ class DatPlotTab(QWidget):
             legend_item.setForeground(row_color)
             self.curve_table.setItem(row, 2, legend_item)
 
-            axis_item = QTableWidgetItem(normalize_plot_axis(curve.get("axis", "left")))
-            axis_item.setToolTip("Use left, left2, right or right2 for the Y axis")
-            axis_item.setForeground(row_color)
+            axis_item = QTableWidgetItem("")
+            axis_item.setFlags(axis_item.flags() & ~Qt.ItemIsEditable)
             self.curve_table.setItem(row, 3, axis_item)
+            axis_button = QPushButton(plot_axis_label(curve.get("axis", "left")), self.curve_table)
+            axis_button.setFixedHeight(22)
+            axis_button.setToolTip("Y axis")
+            axis_button.setStyleSheet("""
+                QPushButton {
+                    background: transparent;
+                    border: 0px;
+                    padding: 0px;
+                    text-align: center;
+                    color: #111827;
+                }
+                QPushButton:hover {
+                    background: #e8e8e8;
+                    border-radius: 4px;
+                }
+                QPushButton::menu-indicator {
+                    image: none;
+                    width: 0px;
+                }
+            """)
+            axis_menu = QMenu(axis_button)
+            axis_menu.setMinimumWidth(56)
+            for axis_name in PLOT_Y_AXES:
+                action = axis_menu.addAction(plot_axis_label(axis_name))
+                action.triggered.connect(
+                    lambda checked=False, curve_key=key, axis=axis_name: self.set_curve_axis(curve_key, axis)
+                )
+            axis_button.setMenu(axis_menu)
+            axis_holder = QWidget()
+            axis_layout = QHBoxLayout(axis_holder)
+            axis_layout.setContentsMargins(0, 0, 0, 0)
+            axis_layout.setSpacing(0)
+            axis_layout.addWidget(axis_button, alignment=Qt.AlignCenter)
+            self.curve_table.setCellWidget(row, 3, axis_holder)
 
             color_item = QTableWidgetItem("")
             color_item.setFlags(color_item.flags() & ~Qt.ItemIsEditable)
@@ -1761,9 +1828,7 @@ class DatPlotTab(QWidget):
         if column == 3:
             item = self.curve_table.item(row, column)
             axis = item.text() if item else "left"
-            self.curves[key]["axis"] = normalize_plot_axis(axis)
-            self.refresh_curve_table()
-            self.update_plot()
+            self.set_curve_axis(key, axis)
             return
         elif column == 4:
             item = self.curve_table.item(row, column)
@@ -1772,6 +1837,16 @@ class DatPlotTab(QWidget):
                 self.update_curve_color_only(key)
                 return
 
+    def set_curve_axis(self, key, axis):
+        if self._refreshing_curve_table or key not in self.curves:
+            return
+
+        normalized_axis = normalize_plot_axis(axis)
+        if self.curves[key].get("axis") == normalized_axis:
+            return
+
+        self.curves[key]["axis"] = normalized_axis
+        self.refresh_curve_table()
         self.update_plot()
 
     def update_plot_legend_only(self):
@@ -2221,30 +2296,62 @@ class DatPlotTab(QWidget):
         self.refresh_guide_table()
         self.update_plot_preserving_view()
 
+    def annotation_row_refs(self):
+        return (
+            [("bar", index) for index in range(len(self.guide_bars))]
+            + [("peak", index) for index in range(len(self.peak_labels))]
+        )
+
+    def guide_value_text(self, bar):
+        axis = str(bar.get("axis", "x")).upper()
+        return f"{axis} = {float(bar.get('value', 0.0)):.6g}"
+
+    def peak_value_text(self, label_data):
+        points = label_data.get("points") or []
+        if not points:
+            return "x = -, y = -"
+        x_value, y_value = points[0]
+        text = f"x = {float(x_value):.6g}, y = {float(y_value):.6g}"
+        if len(points) > 1:
+            text = f"{len(points)} pts: {text}"
+        return text
+
     def refresh_guide_table(self):
         self._refreshing_guide_table = True
         self.guide_table.blockSignals(True)
         self.guide_table.setRowCount(0)
+        self.update_clear_annotations_header_button_position()
 
-        for row, bar in enumerate(self.guide_bars):
+        for row, (kind, index) in enumerate(self.annotation_row_refs()):
             self.guide_table.insertRow(row)
 
-            axis_item = QTableWidgetItem(bar["axis"].upper())
-            axis_item.setFlags(axis_item.flags() & ~Qt.ItemIsEditable)
-            self.guide_table.setItem(row, 0, axis_item)
+            if kind == "bar":
+                item_data = self.guide_bars[index]
+                value_item = QTableWidgetItem(self.guide_value_text(item_data))
+                name_item = QTableWidgetItem("")
+                name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
+                color = item_data.get("color", "#444444")
+                remove_tooltip = "Remove this guide"
+            else:
+                item_data = self.peak_labels[index]
+                value_item = QTableWidgetItem(self.peak_value_text(item_data))
+                value_item.setFlags(value_item.flags() & ~Qt.ItemIsEditable)
+                name_item = QTableWidgetItem(str(item_data.get("name", "peak")))
+                color = item_data.get("color", "#000000")
+                remove_tooltip = "Remove this peak label"
 
-            value_item = QTableWidgetItem(f"{bar['value']:.6g}")
-            self.guide_table.setItem(row, 1, value_item)
+            self.guide_table.setItem(row, 0, value_item)
+            self.guide_table.setItem(row, 1, name_item)
 
             color_item = QTableWidgetItem("")
             color_item.setFlags(color_item.flags() & ~Qt.ItemIsEditable)
-            color_item.setBackground(QColor(bar["color"]))
-            color_item.setToolTip(bar["color"])
+            color_item.setBackground(QColor(color))
+            color_item.setToolTip(color)
             self.guide_table.setItem(row, 2, color_item)
 
             remove_button = QPushButton("−")
             remove_button.setFixedSize(22, 18)
-            remove_button.setToolTip("Remove this dashed bar")
+            remove_button.setToolTip(remove_tooltip)
             remove_button.setStyleSheet("""
                 QPushButton {
                     background: #ffecec;
@@ -2259,7 +2366,7 @@ class DatPlotTab(QWidget):
                     background: #ffd6d6;
                 }
             """)
-            remove_button.clicked.connect(lambda checked=False, bar_row=row: self.remove_guide_bar(bar_row))
+            remove_button.clicked.connect(lambda checked=False, annotation_row=row: self.remove_annotation_row(annotation_row))
 
             remove_holder = QWidget()
             remove_layout = QHBoxLayout(remove_holder)
@@ -2272,42 +2379,74 @@ class DatPlotTab(QWidget):
         self._refreshing_guide_table = False
 
     def guide_table_changed(self, row, column):
-        if self._refreshing_guide_table or column != 1:
+        if self._refreshing_guide_table:
             return
-        if not 0 <= row < len(self.guide_bars):
+        refs = self.annotation_row_refs()
+        if not 0 <= row < len(refs):
             return
 
+        kind, index = refs[row]
         item = self.guide_table.item(row, column)
         if item is None:
             return
 
-        text = item.text().strip().replace(",", ".")
-        try:
-            value = float(text)
-        except ValueError:
-            self.refresh_guide_table()
+        if kind == "bar" and column == 0:
+            text = item.text().strip().replace(",", ".")
+            if "=" in text:
+                text = text.split("=", 1)[1].strip()
+            try:
+                value = float(text)
+            except ValueError:
+                self.refresh_guide_table()
+                return
+
+            self.guide_bars[index]["value"] = value
+            self.update_plot_preserving_view()
             return
 
-        self.guide_bars[row]["value"] = value
-        self.update_plot_preserving_view()
+        if kind == "peak" and column == 1:
+            name = item.text().strip() or "peak"
+            self.peak_labels[index]["name"] = name
+            self.last_peak_label_name = name
+            self.update_plot_preserving_view()
+            return
 
     def guide_table_double_clicked(self, row, column):
-        if column != 2 or not 0 <= row < len(self.guide_bars):
+        if column != 2:
+            return
+        refs = self.annotation_row_refs()
+        if not 0 <= row < len(refs):
+            return
+        kind, index = refs[row]
+        collection = self.guide_bars if kind == "bar" else self.peak_labels
+        color = collection[index].get("color", "#444444" if kind == "bar" else "#000000")
+
+        chosen_color = QColorDialog.getColor(QColor(color), self, "Choose annotation color")
+        if not chosen_color.isValid():
             return
 
-        color = QColorDialog.getColor(QColor(self.guide_bars[row]["color"]), self, "Choose dashed bar color")
-        if not color.isValid():
-            return
-
-        self.guide_bars[row]["color"] = color.name()
+        collection[index]["color"] = chosen_color.name()
         self.refresh_guide_table()
         self.update_plot_preserving_view()
 
-    def remove_guide_bar(self, row):
-        if not 0 <= row < len(self.guide_bars):
+    def remove_annotation_row(self, row):
+        refs = self.annotation_row_refs()
+        if not 0 <= row < len(refs):
             return
 
-        del self.guide_bars[row]
+        kind, index = refs[row]
+        if kind == "bar":
+            del self.guide_bars[index]
+        else:
+            del self.peak_labels[index]
+        self.refresh_guide_table()
+        self.update_plot_preserving_view()
+
+    def clear_annotations(self):
+        self.guide_bars = []
+        self.peak_labels = []
+        self._dragging_peak_label = None
+        self.add_axis_label_button.setChecked(False)
         self.refresh_guide_table()
         self.update_plot_preserving_view()
 
@@ -2339,6 +2478,7 @@ class DatPlotTab(QWidget):
             text_x = float(label_data.get("text_x", first_x))
             text_y = float(label_data.get("text_y", first_y))
             name = str(label_data.get("name", "label"))
+            color = label_data.get("color", "#000000")
             if not all(np.isfinite(value) for value in (text_x, text_y)):
                 continue
             if ax.get_xscale() == "log" and text_x <= 0:
@@ -2362,7 +2502,7 @@ class DatPlotTab(QWidget):
                     xy=(x_value, y_value),
                     xytext=(text_x, text_y),
                     textcoords="data",
-                    arrowprops=dict(arrowstyle="->", color="black", linewidth=1.4),
+                    arrowprops=dict(arrowstyle="->", color=color, linewidth=1.4),
                     zorder=20,
                 )
                 has_visible_arrow = True
@@ -2377,8 +2517,8 @@ class DatPlotTab(QWidget):
                 ha="center",
                 va="center",
                 fontsize=9,
-                color="black",
-                bbox=dict(boxstyle="round,pad=0.25", facecolor="white", edgecolor="black", alpha=0.94),
+                color=color,
+                bbox=dict(boxstyle="round,pad=0.25", facecolor="white", edgecolor=color, alpha=0.94),
                 zorder=21,
             )
             self.peak_label_artists.append({"index": index, "text": text_artist})
@@ -2391,6 +2531,7 @@ class DatPlotTab(QWidget):
         self.peak_labels = []
         self._dragging_peak_label = None
         self.add_axis_label_button.setChecked(False)
+        self.refresh_guide_table()
         self.update_plot()
 
     def peak_label_hit(self, event):
@@ -2441,6 +2582,7 @@ class DatPlotTab(QWidget):
                 points = label_data.setdefault("points", [])
                 points.append((float(event.xdata), float(event.ydata)))
                 self.add_axis_label_button.setChecked(False)
+                self.refresh_guide_table()
                 self.update_plot()
                 return
 
@@ -2449,8 +2591,10 @@ class DatPlotTab(QWidget):
             "points": [(float(event.xdata), float(event.ydata))],
             "text_x": text_x,
             "text_y": text_y,
+            "color": "#000000",
         })
         self.add_axis_label_button.setChecked(False)
+        self.refresh_guide_table()
         self.update_plot()
 
     def plot_curve_segments(self, ax, key, curve, x, y, mode):

@@ -40,6 +40,7 @@ class VimbaSALSWidget(QWidget):
     back_requested = Signal()
     FIELD_HEIGHT = 22
     FIELD_SPACING = 6
+    INNER_GROUP_MARGINS = (8, 10, 8, 8)
     CAMERA_SPIN_WIDTH = 70
     CAMERA_LABEL_WIDTH = 112
     CAMERA_SHORT_LABEL_WIDTH = 58
@@ -261,7 +262,7 @@ class VimbaSALSWidget(QWidget):
         camera_box = QGroupBox("Camera settings")
         camera_box.setStyleSheet(GROUP_BOX_STYLE)
         camera_layout = QVBoxLayout(camera_box)
-        camera_layout.setContentsMargins(*GROUP_BOX_MARGINS)
+        camera_layout.setContentsMargins(*self.INNER_GROUP_MARGINS)
         camera_layout.setSpacing(self.FIELD_SPACING)
         controls_layout.addWidget(camera_box)
 
@@ -272,7 +273,7 @@ class VimbaSALSWidget(QWidget):
         camera_layout.addLayout(
             self.camera_double_field_row("Height", self.height_spinbox, "Offset Y", self.offset_y_spinbox)
         )
-        camera_layout.addLayout(self.camera_field_row("Pixel fmt", self.pixel_format_combo))
+        camera_layout.addLayout(self.camera_field_row("Pixel format", self.pixel_format_combo))
         camera_layout.addLayout(self.camera_field_row("Preview fps", self.fps_spinbox, add_stretch=True))
 
         camera_buttons_layout = QHBoxLayout()
@@ -291,7 +292,7 @@ class VimbaSALSWidget(QWidget):
         file_box = QGroupBox("File settings")
         file_box.setStyleSheet(GROUP_BOX_STYLE)
         file_layout = QVBoxLayout(file_box)
-        file_layout.setContentsMargins(*GROUP_BOX_MARGINS)
+        file_layout.setContentsMargins(*self.INNER_GROUP_MARGINS)
         file_layout.setSpacing(self.FIELD_SPACING)
         controls_layout.addWidget(file_box)
 
@@ -319,7 +320,7 @@ class VimbaSALSWidget(QWidget):
         sals_box = QGroupBox("EDF header")
         sals_box.setStyleSheet(GROUP_BOX_STYLE)
         sals_layout = QGridLayout(sals_box)
-        sals_layout.setContentsMargins(*GROUP_BOX_MARGINS)
+        sals_layout.setContentsMargins(*self.INNER_GROUP_MARGINS)
         sals_layout.setHorizontalSpacing(self.FIELD_SPACING)
         sals_layout.setVerticalSpacing(self.FIELD_SPACING)
         sals_layout.setColumnStretch(1, 1)
