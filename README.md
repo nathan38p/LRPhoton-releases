@@ -2,12 +2,12 @@
 
 ## Overview
 
-<table>
+<table style="border: 0;">
   <tr>
-    <td>
-      <img src="assets/LRPhoton.png" alt="LRPhoton" height="96">
+    <td style="border: 0; padding: 0 18px 0 0; vertical-align: middle;">
+      <img src="assets/LRPhoton.png" alt="LRPhoton" height="140">
     </td>
-    <td>
+    <td style="border: 0; padding: 0; vertical-align: middle;">
       LRPhoton is a Python application for SAXS/WAXS data processing and visualization dedicated to laboratory and synchrotron scattering data, including XENOCS laboratory SAXS systems and ESRF beamlines ID13 and ID02.
     </td>
   </tr>
@@ -63,7 +63,7 @@ The macOS installer will:
 
 The LRPhoton files stay in `/Applications/LRPhoton`.
 
-## Update System
+## Update system
 
 Development is ongoing, new features, improvements and bug fixes are added regularly.
 
