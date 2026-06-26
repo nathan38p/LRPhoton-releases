@@ -50,7 +50,7 @@ from .instrument_presets import (
     ID13_DEFAULT_PIXEL_MM,
     ID13_DEFAULT_WAVELENGTH_A,
 )
-from .file_ratings import install_file_rating_menu, is_file_rated_up, set_item_file_path
+from .file_ratings import install_file_rating_menu, is_file_rated_up, set_item_file_path, should_hide_file_in_browser
 from .line_geometry import LineGeometrySelector, line_geometry_to_lrphoton, parse_header_text
 from .ui_style import (
     BLOCK_SPACING,
@@ -899,10 +899,14 @@ class ViewTab(QWidget):
         self.display_img = None
         self.raw_current_img = None
         self.headers = {}
+        self.complementary_geometry_metadata = []
         self.h5_datasets = []
         self.is_lazy_h5 = False
+        self.is_lazy_edf = False
+        self.edf_path = None
         self.h5_file = None
         self.h5_dataset = None
+        self.h5_frame_axis = None
         self.n_frames = 0
         self.image_shape = None
 
@@ -1514,6 +1518,9 @@ class ViewTab(QWidget):
             self.refresh_files()
 
     def should_show_file_in_browser(self, path):
+        if should_hide_file_in_browser(path):
+            return False
+
         lower_name = path.name.lower()
 
         if lower_name.endswith(".dat"):
@@ -1608,6 +1615,11 @@ class ViewTab(QWidget):
 
     def open_file(self, path):
         self.current_file = Path(path).expanduser().resolve()
+        if should_hide_file_in_browser(self.current_file):
+            self.current_file = None
+            self.refresh_files()
+            return
+
         self.set_toolbar_options_enabled(False)
         if hasattr(self, "keep_zoom_checkbox") and self.keep_zoom_checkbox.isChecked() and self.image_artist is not None:
             self._saved_xlim = self.ax.get_xlim()
@@ -1621,9 +1633,13 @@ class ViewTab(QWidget):
         self.display_img = None
         self.raw_current_img = None
         self.headers = {}
+        self.complementary_geometry_metadata = []
         self.h5_datasets = []
         self.is_lazy_h5 = False
+        self.is_lazy_edf = False
+        self.edf_path = None
         self.h5_dataset = None
+        self.h5_frame_axis = None
         self.is_azimuthal_image = False
 
         if self.h5_file is not None:
@@ -1700,7 +1716,9 @@ class ViewTab(QWidget):
         self.images = None
         self.headers = {}
         self.raw_header_text = ""
-        frames = []
+        self.is_lazy_edf = True
+        self.edf_path = path
+        first_image = None
 
         edf = fabio.open(str(path))
 
@@ -1729,16 +1747,12 @@ class ViewTab(QWidget):
                 parsed_header = {}
 
             if nframes <= 1:
-                frames.append(np.array(edf.data, dtype=float).copy())
+                first_image = np.array(edf.data, dtype=float).copy()
                 self.headers = dict(edf.header)
-
             else:
-                for i in range(nframes):
-                    frame = edf.getframe(i)
-                    frames.append(np.array(frame.data, dtype=float).copy())
-
-                    if i == 0:
-                        self.headers = dict(frame.header)
+                first_frame = edf.getframe(0)
+                first_image = np.array(first_frame.data, dtype=float).copy()
+                self.headers = dict(first_frame.header)
 
             if parsed_header:
                 self.headers = {**self.headers, **parsed_header}
@@ -1749,25 +1763,27 @@ class ViewTab(QWidget):
             except Exception:
                 pass
 
-        if not frames:
+        if first_image is None:
             raise ValueError("No frame was found in this EDF file.")
 
-        self.images = np.stack(frames, axis=0)
+        self.n_frames = max(1, nframes)
+        self.image_shape = first_image.shape
+        self.add_matching_geometry_to_headers()
 
         self.dataset_list.clear()
-        for i in range(self.images.shape[0]):
+        for i in range(self.n_frames):
             self.dataset_list.addItem(f"Frame {i + 1}")
 
-        print("EDF loaded shape:", self.images.shape)
-        print("EDF intensity min/max:", np.nanmin(self.images), np.nanmax(self.images))
+        print("EDF lazy loaded:", self.n_frames, "frame(s)", self.image_shape)
+        print("EDF frame 1 intensity min/max:", np.nanmin(first_image), np.nanmax(first_image))
 
         self.configure_azimuthal_display_defaults()
 
         self.update_file_information(
             "EDF",
             "-",
-            self.images.shape[0],
-            self.images.shape[1:]
+            self.n_frames,
+            self.image_shape
         )
 
         self.configure_slider()
@@ -1784,7 +1800,9 @@ class ViewTab(QWidget):
             with h5py.File(path, "r") as h5:
                 def visitor(name, obj):
                     if isinstance(obj, h5py.Dataset) and obj.ndim in [2, 3]:
-                        datasets.append((name, obj.shape, obj.dtype))
+                        frame_axis, n_frames, image_shape = self.h5_dataset_image_info(obj.shape)
+                        score = self.h5_dataset_image_score(name, obj, frame_axis, n_frames, image_shape)
+                        datasets.append((name, obj.shape, obj.dtype, frame_axis, n_frames, image_shape, score))
 
                 h5.visititems(visitor)
 
@@ -1801,11 +1819,51 @@ class ViewTab(QWidget):
 
         self.h5_datasets = datasets
 
-        for name, shape, dtype in datasets:
+        for name, shape, dtype, _frame_axis, _n_frames, _image_shape, _score in datasets:
             self.dataset_list.addItem(f"{name}   {shape}")
 
-        self.dataset_list.setCurrentRow(0)
-        self.open_h5_dataset(datasets[0][0])
+        preferred_row = max(range(len(datasets)), key=lambda index: datasets[index][6])
+        self.dataset_list.setCurrentRow(preferred_row)
+        self.open_h5_dataset(datasets[preferred_row][0])
+
+    def h5_dataset_image_info(self, shape):
+        shape = tuple(int(size) for size in shape)
+        if len(shape) == 2:
+            return None, 1, shape
+        if len(shape) == 3:
+            frame_axis = int(np.argmin(shape))
+            n_frames = int(shape[frame_axis])
+            image_shape = tuple(size for axis, size in enumerate(shape) if axis != frame_axis)
+            return frame_axis, n_frames, image_shape
+        raise ValueError("Dataset must be 2D or 3D.")
+
+    def h5_dataset_image_score(self, name, dataset, frame_axis, n_frames, image_shape):
+        lower_name = str(name).lower()
+        score = float(image_shape[0]) * float(image_shape[1])
+
+        if len(tuple(dataset.shape)) == 3:
+            score *= 10.0
+
+        if min(image_shape) >= 128:
+            score *= 4.0
+        elif min(image_shape) < 32:
+            score *= 0.05
+
+        if any(token in lower_name for token in ["data", "image", "eiger", "detector", "pilatus"]):
+            score *= 3.0
+        if any(token in lower_name for token in ["mcs", "spectrum", "spectra", "counter", "monitor"]):
+            score *= 0.05
+
+        interpretation = str(dataset.attrs.get("interpretation", "")).lower()
+        if "image" in interpretation:
+            score *= 3.0
+        if "spectrum" in interpretation:
+            score *= 0.02
+
+        if n_frames > 1:
+            score *= 1.5
+
+        return score
 
     def open_selected_dataset(self):
         row = self.dataset_list.currentRow()
@@ -1828,9 +1886,11 @@ class ViewTab(QWidget):
             self.h5_file = h5py.File(self.current_file, "r")
             self.h5_dataset = self.h5_file[dataset_name]
 
-            shape = self.h5_dataset.shape
+            shape = tuple(self.h5_dataset.shape)
             dtype = self.h5_dataset.dtype
+            frame_axis, n_frames, image_shape = self.h5_dataset_image_info(shape)
 
+            self.complementary_geometry_metadata = []
             self.headers = {
                 "Dataset": dataset_name,
                 "Shape": str(shape),
@@ -1843,25 +1903,20 @@ class ViewTab(QWidget):
             for key, value in self.h5_file.attrs.items():
                 self.headers[f"File attribute - {key}"] = str(value)
 
-            self.add_matching_edf_center_to_headers()
+            self.add_matching_geometry_to_headers()
 
         except Exception as e:
             raise RuntimeError(f"Unable to read this H5 dataset:\n{e}")
 
-        if len(shape) == 2:
-            self.is_lazy_h5 = True
-            self.images = None
-            self.n_frames = 1
-            self.image_shape = shape
+        self.is_lazy_h5 = True
+        self.images = None
+        self.h5_frame_axis = frame_axis
+        self.n_frames = n_frames
+        self.image_shape = image_shape
 
-        elif len(shape) == 3:
-            self.is_lazy_h5 = True
-            self.images = None
-            self.n_frames = shape[0]
-            self.image_shape = shape[1:]
-
-        else:
-            raise ValueError("Dataset must be 2D or 3D.")
+        if self.h5_frame_axis is not None:
+            self.headers["Frame axis"] = str(self.h5_frame_axis)
+            self.headers["Number of frames"] = str(self.n_frames)
 
         self.current_index = 0
         self.configure_azimuthal_display_defaults()
@@ -1928,6 +1983,23 @@ class ViewTab(QWidget):
                 f"Wavelength: {wavelength_nm:.6g} nm",
             ])
 
+        if self.complementary_geometry_metadata:
+            lines.extend([
+                "",
+                "Complementary geometry metadata:",
+            ])
+            for block in self.complementary_geometry_metadata:
+                source = block.get("source", "")
+                source_format = block.get("format", "")
+                entries = block.get("entries", [])
+                copied = block.get("copied", [])
+                lines.append(f"Source: {source} ({source_format})")
+                if copied:
+                    lines.append(f"Used to complete: {', '.join(copied)}")
+                for origin, key, value in entries:
+                    origin_text = f"{origin} / " if origin else ""
+                    lines.append(f"{origin_text}{key}: {value}")
+
         self.info_text.setPlainText("\n".join(lines))
 
     def refresh_file_information(self):
@@ -1946,36 +2018,172 @@ class ViewTab(QWidget):
             self.image_shape,
         )
 
-    def add_matching_edf_center_to_headers(self):
+    def add_matching_geometry_to_headers(self):
         if self.current_file is None:
             return
 
-        edf_path = self.current_file.with_suffix(".edf")
-        if not edf_path.exists():
+        suffix = self.current_file.suffix.lower()
+        if suffix == ".h5":
+            matching_path = self.current_file.with_suffix(".edf")
+            source_format = "EDF"
+            reader = self.read_edf_geometry_metadata
+        elif suffix == ".edf":
+            matching_path = self.current_file.with_suffix(".h5")
+            source_format = "HDF5"
+            reader = self.read_h5_geometry_metadata
+        else:
             return
 
+        if not matching_path.exists():
+            return
+
+        entries = reader(matching_path)
+        geometry_entries = self.geometry_metadata_entries(entries)
+        if not geometry_entries:
+            return
+
+        copied = []
+        for canonical_key, aliases in self.geometry_header_groups():
+            if self.header_has_alias(aliases):
+                continue
+            match = self.first_entry_matching_aliases(geometry_entries, aliases)
+            if match is None:
+                continue
+            _origin, key, value = match
+            self.headers[canonical_key] = value
+            copied.append(canonical_key)
+
+        self.headers["Complementary geometry source"] = matching_path.name
+        self.complementary_geometry_metadata.append({
+            "source": matching_path.name,
+            "format": source_format,
+            "entries": geometry_entries,
+            "copied": copied,
+        })
+
+    def geometry_header_groups(self):
+        return [
+            ("Center_1", [
+                "Center_1", "center_1", "Center1", "BeamCenter_1",
+                "BeamCenterX", "Center_X", "CenterX", "center_x",
+                "Poni1", "Beam_x", "beam_x",
+            ]),
+            ("Center_2", [
+                "Center_2", "center_2", "Center2", "BeamCenter_2",
+                "BeamCenterY", "Center_Y", "CenterY", "center_y",
+                "Poni2", "Beam_y", "beam_y",
+            ]),
+            ("SampleDistance", [
+                "SampleDistance", "sampledistance", "sample_distance",
+                "Distance", "DetectorDistance", "detector_distance",
+            ]),
+            ("PSize_1", [
+                "PSize_1", "psize_1", "PSize_X", "PixelSizeX",
+                "pixel_size_x", "x_pixel_size",
+            ]),
+            ("PSize_2", [
+                "PSize_2", "psize_2", "PSize_Y", "PixelSizeY",
+                "pixel_size_y", "y_pixel_size",
+            ]),
+            ("WaveLength", [
+                "WaveLength", "Wavelength", "wavelength", "Lambda", "lambda",
+            ]),
+            ("BeamEnergy", [
+                "BeamEnergy", "beamenergy", "beam_energy", "Energy", "energy",
+            ]),
+        ]
+
+    def geometry_aliases(self):
+        aliases = set()
+        for _canonical_key, group_aliases in self.geometry_header_groups():
+            aliases.update(self.normalized_header_key(alias) for alias in group_aliases)
+        return aliases
+
+    def geometry_metadata_entries(self, entries):
+        aliases = self.geometry_aliases()
+        geometry_entries = []
+        seen = set()
+        for origin, key, value in entries:
+            normalized = self.normalized_header_key(key)
+            if normalized not in aliases:
+                continue
+            item_key = (str(origin), str(key), str(value))
+            if item_key in seen:
+                continue
+            seen.add(item_key)
+            geometry_entries.append((origin, key, value))
+        return geometry_entries
+
+    def header_has_alias(self, aliases):
+        normalized_aliases = {self.normalized_header_key(alias) for alias in aliases}
+        for key, _value in self.expanded_header_items():
+            if self.normalized_header_key(key) in normalized_aliases:
+                return True
+        return False
+
+    def first_entry_matching_aliases(self, entries, aliases):
+        normalized_aliases = {self.normalized_header_key(alias) for alias in aliases}
+        for entry in entries:
+            _origin, key, _value = entry
+            if self.normalized_header_key(key) in normalized_aliases:
+                return entry
+        return None
+
+    def read_edf_geometry_metadata(self, path):
         try:
             import fabio
 
-            edf = fabio.open(str(edf_path))
+            edf = fabio.open(str(path))
             try:
-                edf_header = dict(edf.header)
+                header = dict(edf.header)
             finally:
                 try:
                     edf.close()
                 except Exception:
                     pass
+
+            try:
+                with open(path, "rb") as handle:
+                    header_bytes = handle.read(65536)
+                    header_text = header_bytes.decode("latin-1", errors="ignore")
+                parsed = parse_header_text(header_text)
+                header.update(parsed)
+            except Exception:
+                pass
+
+            return [("", str(key), str(value)) for key, value in header.items()]
         except Exception:
-            return
+            return []
 
-        copied = []
-        for key in ["Center_1", "Center_2", "center_1", "center_2"]:
-            if key in edf_header and key not in self.headers:
-                self.headers[key] = edf_header[key]
-                copied.append(key)
+    def read_h5_geometry_metadata(self, path):
+        entries = []
 
-        if copied:
-            self.headers["Center source"] = edf_path.name
+        def add_entry(origin, key, value):
+            try:
+                if isinstance(value, np.ndarray):
+                    value = value.tolist()
+                elif hasattr(value, "item"):
+                    value = value.item()
+            except Exception:
+                pass
+            entries.append((origin, str(key), str(value)))
+
+        try:
+            with h5py.File(path, "r") as h5:
+                for key, value in h5.attrs.items():
+                    add_entry("/", key, value)
+
+                def visitor(name, obj):
+                    if obj.attrs:
+                        origin = f"/{name}"
+                        for key, value in obj.attrs.items():
+                            add_entry(origin, key, value)
+
+                h5.visititems(visitor)
+        except Exception:
+            return []
+
+        return entries
 
     def is_azimuthal_processed_file(self):
         if self.current_file is not None:
@@ -1988,26 +2196,18 @@ class ViewTab(QWidget):
             value_text = str(value).lower()
             if key_text == "processing" and "azim" in value_text:
                 return True
-            if "azim" in key_text and value_text not in ("", "none"):
-                return True
 
         return False
 
     def configure_azimuthal_display_defaults(self):
         self.is_azimuthal_image = self.is_azimuthal_processed_file()
-        if not self.is_azimuthal_image:
-            return
-
-        self.keep_ratio_checkbox.blockSignals(True)
-        self.keep_ratio_checkbox.setChecked(False)
-        self.keep_ratio_checkbox.blockSignals(False)
 
     # ============================================================
     # IMAGE DISPLAY
     # ============================================================
 
     def configure_slider(self):
-        n = self.n_frames if self.is_lazy_h5 else self.images.shape[0]
+        n = self.total_frame_count()
 
         self.frame_start_spin.blockSignals(True)
         self.frame_end_spin.blockSignals(True)
@@ -2033,11 +2233,8 @@ class ViewTab(QWidget):
         self.update_frame_navigation_state()
 
     def update_frame_slider_range(self):
-        if self.is_lazy_h5:
-            n = self.n_frames
-        elif self.images is not None:
-            n = self.images.shape[0]
-        else:
+        n = self.total_frame_count()
+        if n <= 0:
             return
 
         start = self.frame_start_spin.value() - 1
@@ -2063,12 +2260,7 @@ class ViewTab(QWidget):
             self.update_frame_navigation_state()
 
     def update_frame_navigation_state(self):
-        if self.is_lazy_h5:
-            total = self.n_frames
-        elif self.images is not None:
-            total = self.images.shape[0]
-        else:
-            total = 0
+        total = self.total_frame_count()
         can_navigate = total > 1
         self.frame_start_spin.setEnabled(can_navigate)
         self.frame_end_spin.setEnabled(can_navigate)
@@ -2076,7 +2268,40 @@ class ViewTab(QWidget):
         self.previous_button.setEnabled(can_navigate and self.current_index > self.frame_slider.minimum())
         self.next_button.setEnabled(can_navigate and self.current_index < self.frame_slider.maximum())
 
+    def total_frame_count(self):
+        if self.is_lazy_h5 or self.is_lazy_edf:
+            return max(0, int(self.n_frames or 0))
+        if self.images is not None:
+            return int(self.images.shape[0])
+        return 0
+
+    def read_edf_frame(self, frame_index):
+        try:
+            import fabio
+        except ImportError:
+            return None
+
+        if self.edf_path is None:
+            return None
+
+        edf = fabio.open(str(self.edf_path))
+        try:
+            nframes = int(getattr(edf, "nframes", 1) or 1)
+            frame_index = max(0, min(int(frame_index), nframes - 1))
+            if nframes <= 1:
+                return np.array(edf.data, dtype=float)
+            frame = edf.getframe(frame_index)
+            return np.array(frame.data, dtype=float)
+        finally:
+            try:
+                edf.close()
+            except Exception:
+                pass
+
     def get_current_image(self):
+        if self.is_lazy_edf:
+            return self.read_edf_frame(self.current_index)
+
         if self.is_lazy_h5:
             if self.h5_dataset is None:
                 return None
@@ -2084,7 +2309,12 @@ class ViewTab(QWidget):
             if self.h5_dataset.ndim == 2:
                 return np.array(self.h5_dataset, dtype=float)
 
-            return np.array(self.h5_dataset[self.current_index], dtype=float)
+            frame_axis = 0 if self.h5_frame_axis is None else self.h5_frame_axis
+            if frame_axis == 0:
+                return np.array(self.h5_dataset[self.current_index, :, :], dtype=float)
+            if frame_axis == 1:
+                return np.array(self.h5_dataset[:, self.current_index, :], dtype=float)
+            return np.array(self.h5_dataset[:, :, self.current_index], dtype=float)
 
         if self.images is None:
             return None
@@ -2132,42 +2362,78 @@ class ViewTab(QWidget):
             "beam_y"
         ]
 
-        x = None
-        y = None
-
-        for key in possible_x_keys:
-            if key in self.headers:
-                try:
-                    x = float(str(self.headers[key]).replace(",", "."))
-                    break
-                except Exception:
-                    pass
-
-        for key in possible_y_keys:
-            if key in self.headers:
-                try:
-                    y = float(str(self.headers[key]).replace(",", "."))
-                    break
-                except Exception:
-                    pass
+        x = self.header_float_by_alias(possible_x_keys)
+        y = self.header_float_by_alias(possible_y_keys)
 
         if x is None or y is None:
             return None
 
         return x, y
 
+    def normalized_header_key(self, key):
+        text = str(key)
+        for prefix in ("File attribute - ", "edf_header_"):
+            if text.startswith(prefix):
+                text = text[len(prefix):]
+        return re.sub(r"[^a-z0-9]", "", text.lower())
+
+    def expanded_header_items(self):
+        items = list(self.headers.items())
+
+        for json_key in ("edf_header_json", "source_h5_attrs_json"):
+            raw_json = self.headers.get(json_key)
+            if not raw_json:
+                continue
+            try:
+                payload = json.loads(str(raw_json))
+            except (TypeError, json.JSONDecodeError):
+                continue
+
+            if json_key == "edf_header_json" and isinstance(payload, dict):
+                items.extend(payload.items())
+            elif json_key == "source_h5_attrs_json" and isinstance(payload, dict):
+                for attrs in payload.values():
+                    if isinstance(attrs, dict):
+                        items.extend(attrs.items())
+
+        return items
+
+    def header_float_by_alias(self, aliases):
+        normalized_aliases = {self.normalized_header_key(alias) for alias in aliases}
+
+        for key, value in self.expanded_header_items():
+            if self.normalized_header_key(key) not in normalized_aliases:
+                continue
+            parsed = self.parse_header_float(value)
+            if parsed is not None:
+                return parsed
+
+        return None
+
+    def parse_header_float(self, value):
+        text = str(value).strip().replace(",", ".")
+        if not text:
+            return None
+
+        try:
+            return float(text)
+        except ValueError:
+            pass
+
+        match = re.search(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?", text)
+        if match is None:
+            return None
+
+        try:
+            return float(match.group(0))
+        except ValueError:
+            return None
+
     def get_header_float(self, *keys):
         if not self.headers:
             return None
 
-        for key in keys:
-            if key in self.headers:
-                try:
-                    return float(str(self.headers[key]).replace(",", "."))
-                except Exception:
-                    pass
-
-        return None
+        return self.header_float_by_alias(keys)
 
     def get_header_q_values(self):
         center = self.get_center_from_header()
@@ -2202,6 +2468,15 @@ class ViewTab(QWidget):
             "Lambda",
             "lambda",
         )
+        if wavelength is None:
+            beam_energy = self.get_header_float(
+                "BeamEnergy",
+                "beamenergy",
+                "beam_energy",
+                "Energy",
+                "energy",
+            )
+            wavelength = self.beam_energy_to_wavelength_a(beam_energy)
 
         values = {}
         if center is not None:
@@ -2221,6 +2496,14 @@ class ViewTab(QWidget):
                 values["wavelength_a"] = wavelength
 
         return values
+
+    def beam_energy_to_wavelength_a(self, beam_energy):
+        if beam_energy is None or beam_energy <= 0:
+            return None
+
+        # ID02 headers commonly store beamenergy in eV; keV values are also accepted.
+        energy_ev = beam_energy * 1000.0 if beam_energy < 100.0 else beam_energy
+        return 12398.419843320026 / energy_ev
 
     def wavelength_to_nm(self, wavelength):
         if wavelength < 1e-6:
@@ -2273,6 +2556,15 @@ class ViewTab(QWidget):
             "Lambda",
             "lambda",
         )
+        if wavelength is None:
+            beam_energy = self.get_header_float(
+                "BeamEnergy",
+                "beamenergy",
+                "beam_energy",
+                "Energy",
+                "energy",
+            )
+            wavelength = self.beam_energy_to_wavelength_a(beam_energy)
 
         if distance_m is None or pixel_x is None or pixel_y is None or wavelength is None:
             return None
@@ -2483,7 +2775,7 @@ class ViewTab(QWidget):
 
         self.draw_center_cross()
 
-        total = self.n_frames if self.is_lazy_h5 else self.images.shape[0]
+        total = self.total_frame_count()
         self.frame_label.setText(f"{self.current_index + 1} / {total}")
 
         self.ax.set_autoscale_on(False)
@@ -2714,7 +3006,7 @@ class ViewTab(QWidget):
         parts = [str(Path(self.current_file).expanduser().resolve())]
         if self.current_dataset_name:
             parts.append(f"dataset={self.current_dataset_name}")
-        total_frames = self.n_frames if self.is_lazy_h5 else (self.images.shape[0] if self.images is not None else 1)
+        total_frames = self.total_frame_count()
         if total_frames > 1:
             parts.append(f"frame={self.current_index + 1}")
         return "#".join(parts)
@@ -2733,7 +3025,7 @@ class ViewTab(QWidget):
             return
 
         frame_suffix = ""
-        total_frames = self.n_frames if self.is_lazy_h5 else (self.images.shape[0] if self.images is not None else 1)
+        total_frames = self.total_frame_count()
         if total_frames > 1:
             frame_suffix = f"_frame{self.current_index + 1:04d}"
 

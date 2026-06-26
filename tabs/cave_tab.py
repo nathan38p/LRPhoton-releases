@@ -69,7 +69,7 @@ from .ui_style import (
     normalize_decimal_text,
     style_q_geometry_buttons,
 )
-from .file_ratings import install_file_rating_menu, is_file_rated_up, set_item_file_path
+from .file_ratings import install_file_rating_menu, is_file_rated_up, set_item_file_path, should_hide_file_in_browser
 from .line_geometry import LineGeometrySelector, line_geometry_to_lrphoton
 
 
@@ -104,6 +104,25 @@ def parse_edf_header(header_text: str) -> dict:
     return header
 
 
+# Helper to infer EDF header size if not explicitly present
+def infer_edf_header_size(first_chunk: str) -> int:
+    match = re.search(r"EDF_HeaderSize\s*[:=]\s*(\d+)", first_chunk)
+    if match:
+        return int(match.group(1))
+
+    closing = first_chunk.find("}")
+    if closing < 0:
+        raise ValueError("EDF header size not found and closing brace not found.")
+
+    header_end = closing + 1
+    for boundary in (1024, 512, 256):
+        padded_size = int(np.ceil(header_end / boundary) * boundary)
+        if padded_size <= len(first_chunk):
+            return padded_size
+
+    return header_end
+
+
 def edf_dtype_to_numpy(data_type: str):
     data_type = data_type.strip().lower()
 
@@ -128,40 +147,161 @@ def edf_dtype_to_numpy(data_type: str):
 
 
 def read_edf_file(filename: str):
+    image, header, raw_header_text, byte_order, _n_frames = read_edf_frame(filename, 0)
+    return image, header, raw_header_text, byte_order
+
+
+def read_edf_frame(filename: str, frame_index: int = 0):
+    filename = Path(filename)
+    frame_index = max(0, int(frame_index))
+
+    selected_image = None
+    selected_header = None
+    selected_raw_header_text = ""
+    selected_byte_order = "LowByteFirst"
+    first_header = None
+    first_raw_header_text = ""
+    first_byte_order = "LowByteFirst"
+    total_frames = 0
+    offset = 0
+    file_size = filename.stat().st_size
+
+    with open(filename, "rb") as file:
+        while offset < file_size:
+            file.seek(offset)
+            first = file.read(8192).decode("latin-1", errors="ignore")
+            if not first.strip():
+                break
+
+            try:
+                header_size = infer_edf_header_size(first)
+            except ValueError:
+                if total_frames:
+                    break
+                raise ValueError("EDF_HeaderSize not found in EDF header.")
+            file.seek(offset)
+            raw_header_bytes = file.read(header_size)
+            raw_header_text = raw_header_bytes.decode("latin-1", errors="ignore")
+            header = parse_edf_header(raw_header_text)
+
+            data_type = header.get("DataType", "FloatValue")
+            byte_order = header.get("ByteOrder", "LowByteFirst")
+            dim_1 = int(float(header["Dim_1"]))
+            dim_2 = int(float(header["Dim_2"]))
+            block_frame_count = 1
+            for frame_key in ["Dim_3", "Dim_4", "NumberOfFrames", "NFrames", "NumFrames"]:
+                if frame_key in header:
+                    try:
+                        block_frame_count = max(1, int(float(header[frame_key])))
+                        break
+                    except (TypeError, ValueError):
+                        continue
+
+            dtype = np.dtype(edf_dtype_to_numpy(data_type))
+            dtype = dtype.newbyteorder(">" if byte_order.lower() == "highbytefirst" else "<")
+            pixels_per_frame = dim_1 * dim_2
+            bytes_per_frame = pixels_per_frame * dtype.itemsize
+            data_offset = file.tell()
+
+            if first_header is None:
+                first_header = header
+                first_raw_header_text = raw_header_text
+                first_byte_order = byte_order
+
+            block_start = total_frames
+            block_end = block_start + block_frame_count
+            if selected_image is None and block_start <= frame_index < block_end:
+                local_frame = frame_index - block_start
+                file.seek(data_offset + local_frame * bytes_per_frame)
+                data = np.fromfile(file, dtype=dtype, count=pixels_per_frame)
+                if data.size != pixels_per_frame:
+                    raise ValueError(f"Incorrect EDF data size: expected {pixels_per_frame}, read {data.size}.")
+                selected_image = data.reshape((dim_2, dim_1)).astype(np.float64)
+                selected_header = header
+                selected_raw_header_text = raw_header_text
+                selected_byte_order = byte_order
+
+            total_frames = block_end
+            offset = data_offset + block_frame_count * bytes_per_frame
+
+    if total_frames <= 0:
+        raise ValueError("No image found in EDF file.")
+
+    if selected_image is None:
+        return read_edf_frame(filename, total_frames - 1)
+
+    if selected_header is None:
+        selected_header = first_header
+        selected_raw_header_text = first_raw_header_text
+        selected_byte_order = first_byte_order
+
+    return selected_image, selected_header, selected_raw_header_text, selected_byte_order, total_frames
+
+
+def read_edf_frames(filename: str):
     filename = Path(filename)
 
-    with open(filename, "rb") as file:
-        first = file.read(8192).decode("latin-1", errors="ignore")
-
-    match = re.search(r"EDF_HeaderSize\s*=\s*(\d+)", first)
-    if not match:
-        raise ValueError("EDF_HeaderSize not found in EDF header.")
-
-    header_size = int(match.group(1))
+    frames = []
+    first_header = None
+    first_raw_header_text = ""
+    first_byte_order = "LowByteFirst"
+    offset = 0
+    file_size = filename.stat().st_size
 
     with open(filename, "rb") as file:
-        raw_header_bytes = file.read(header_size)
-        raw_header_text = raw_header_bytes.decode("latin-1", errors="ignore")
+        while offset < file_size:
+            file.seek(offset)
+            first = file.read(8192).decode("latin-1", errors="ignore")
+            if not first.strip():
+                break
 
-    header = parse_edf_header(raw_header_text)
+            try:
+                header_size = infer_edf_header_size(first)
+            except ValueError:
+                if frames:
+                    break
+                raise ValueError("EDF_HeaderSize not found in EDF header.")
+            file.seek(offset)
+            raw_header_bytes = file.read(header_size)
+            raw_header_text = raw_header_bytes.decode("latin-1", errors="ignore")
+            header = parse_edf_header(raw_header_text)
 
-    data_type = header.get("DataType", "FloatValue")
-    byte_order = header.get("ByteOrder", "LowByteFirst")
-    dim_1 = int(float(header["Dim_1"]))
-    dim_2 = int(float(header["Dim_2"]))
+            data_type = header.get("DataType", "FloatValue")
+            byte_order = header.get("ByteOrder", "LowByteFirst")
+            dim_1 = int(float(header["Dim_1"]))
+            dim_2 = int(float(header["Dim_2"]))
+            frame_count = 1
+            for frame_key in ["Dim_3", "Dim_4", "NumberOfFrames", "NFrames", "NumFrames"]:
+                if frame_key in header:
+                    try:
+                        frame_count = max(1, int(float(header[frame_key])))
+                        break
+                    except (TypeError, ValueError):
+                        continue
 
-    dtype = np.dtype(edf_dtype_to_numpy(data_type))
-    dtype = dtype.newbyteorder(">" if byte_order.lower() == "highbytefirst" else "<")
+            dtype = np.dtype(edf_dtype_to_numpy(data_type))
+            dtype = dtype.newbyteorder(">" if byte_order.lower() == "highbytefirst" else "<")
 
-    with open(filename, "rb") as file:
-        file.seek(header_size)
-        data = np.fromfile(file, dtype=dtype, count=dim_1 * dim_2)
+            expected_count = dim_1 * dim_2 * frame_count
+            data = np.fromfile(file, dtype=dtype, count=expected_count)
 
-    if data.size != dim_1 * dim_2:
-        raise ValueError(f"Incorrect EDF data size: expected {dim_1 * dim_2}, read {data.size}.")
+            if data.size != expected_count:
+                raise ValueError(f"Incorrect EDF data size: expected {expected_count}, read {data.size}.")
 
-    image = data.reshape((dim_2, dim_1)).astype(np.float64)
-    return image, header, raw_header_text, byte_order
+            block_frames = data.reshape((frame_count, dim_2, dim_1)).astype(np.float64)
+            frames.extend(block_frames)
+
+            if first_header is None:
+                first_header = header
+                first_raw_header_text = raw_header_text
+                first_byte_order = byte_order
+
+            offset = file.tell()
+
+    if not frames:
+        raise ValueError("No image found in EDF file.")
+
+    return np.asarray(frames, dtype=np.float64), first_header, first_raw_header_text, first_byte_order
 
 
 def add_matching_edf_center(header: dict, filename: str):
@@ -210,6 +350,9 @@ def write_edf_file(filename: str, image: np.ndarray, raw_header_text: str, byte_
     header_text = update_edf_header_value(header_text, "DataType", "FloatValue")
     header_text = update_edf_header_value(header_text, "Size", str(nx * ny * 4))
     header_text = update_edf_header_value(header_text, "EDF_BinarySize", str(nx * ny * 4))
+    for frame_key in ["Dim_3", "Dim_4", "NumberOfFrames", "NFrames", "NumFrames"]:
+        if re.search(rf"{re.escape(frame_key)}\s*=", header_text):
+            header_text = update_edf_header_value(header_text, frame_key, "1")
 
     match = re.search(r"EDF_HeaderSize\s*=\s*(\d+)", header_text)
     header_size = int(match.group(1)) if match else 1024
@@ -242,6 +385,112 @@ def sanitize_cave_output_image(image: np.ndarray):
     return output
 
 
+def h5_attr_value(value):
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, bytes):
+        return value.decode("latin-1", errors="ignore")
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(value, ensure_ascii=False)
+    return value
+
+
+def h5_attr_json_value(value):
+    value = h5_attr_value(value)
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, (np.bytes_,)):
+        return bytes(value).decode("latin-1", errors="ignore")
+    try:
+        json.dumps(value)
+        return value
+    except TypeError:
+        return str(value)
+
+
+def set_h5_attr(attrs, key, value):
+    try:
+        attrs[str(key)] = h5_attr_value(value)
+    except TypeError:
+        attrs[str(key)] = str(value)
+
+
+def copy_h5_attrs(source_attrs, target_attrs, prefix=None, overwrite=False):
+    for key, value in source_attrs.items():
+        target_key = f"{prefix}{key}" if prefix else str(key)
+        if not overwrite and target_key in target_attrs:
+            continue
+        set_h5_attr(target_attrs, target_key, value)
+
+
+def matching_edf_header(filename: str):
+    edf_path = Path(filename).with_suffix(".edf")
+    if not edf_path.exists():
+        return {}
+
+    try:
+        _image, header, *_ = read_edf_file(edf_path)
+        return dict(header)
+    except Exception:
+        return {}
+
+
+def collect_h5_attrs_json(source):
+    collected = {
+        "/": {str(key): h5_attr_json_value(value) for key, value in source.attrs.items()}
+    }
+
+    def collect(name, obj):
+        if obj.attrs:
+            collected[f"/{name}"] = {
+                str(key): h5_attr_json_value(value)
+                for key, value in obj.attrs.items()
+            }
+
+    source.visititems(collect)
+    return collected
+
+
+def add_h5_output_metadata(out, dataset, source_file: str, source_dataset_name: str):
+    source_file = Path(source_file)
+
+    set_h5_attr(out.attrs, "source_file", source_file.name)
+    set_h5_attr(out.attrs, "source_dataset", source_dataset_name)
+    set_h5_attr(out.attrs, "processing", "central symmetry cave filling")
+    set_h5_attr(dataset.attrs, "source_file", source_file.name)
+    set_h5_attr(dataset.attrs, "source_dataset", source_dataset_name)
+    set_h5_attr(dataset.attrs, "processing", "central symmetry cave filling")
+
+    try:
+        with h5py.File(source_file, "r") as source:
+            copy_h5_attrs(source.attrs, out.attrs)
+            source_attrs_json = json.dumps(collect_h5_attrs_json(source), ensure_ascii=False)
+            set_h5_attr(out.attrs, "source_h5_attrs_json", source_attrs_json)
+            set_h5_attr(dataset.attrs, "source_h5_attrs_json", source_attrs_json)
+            if source_dataset_name in source:
+                copy_h5_attrs(source[source_dataset_name].attrs, dataset.attrs)
+    except Exception:
+        pass
+
+    edf_header = matching_edf_header(source_file)
+    if not edf_header:
+        return
+
+    set_h5_attr(out.attrs, "edf_header_source", source_file.with_suffix(".edf").name)
+    set_h5_attr(dataset.attrs, "edf_header_source", source_file.with_suffix(".edf").name)
+    edf_header_json = json.dumps(edf_header, ensure_ascii=False)
+    set_h5_attr(out.attrs, "edf_header_json", edf_header_json)
+    set_h5_attr(dataset.attrs, "edf_header_json", edf_header_json)
+
+    for key, value in edf_header.items():
+        if key not in out.attrs:
+            set_h5_attr(out.attrs, key, value)
+        if key not in dataset.attrs:
+            set_h5_attr(dataset.attrs, key, value)
+        set_h5_attr(out.attrs, f"edf_header_{key}", value)
+        set_h5_attr(dataset.attrs, f"edf_header_{key}", value)
+
+
 # New function for writing cave-filled H5 frames
 def write_h5_frame_file(filename: str, image: np.ndarray, source_file: str, source_dataset_name: str, frame_index: int):
     filename = Path(filename)
@@ -249,10 +498,73 @@ def write_h5_frame_file(filename: str, image: np.ndarray, source_file: str, sour
 
     with h5py.File(filename, "w") as out:
         dataset = out.create_dataset("/entry_0000/instrument/eiger/data", data=sanitize_cave_output_image(image), compression="gzip")
-        dataset.attrs["source_file"] = str(source_file.name)
-        dataset.attrs["source_dataset"] = str(source_dataset_name)
-        dataset.attrs["source_frame"] = int(frame_index)
-        dataset.attrs["processing"] = "central symmetry cave filling"
+        add_h5_output_metadata(out, dataset, source_file, source_dataset_name)
+        set_h5_attr(dataset.attrs, "source_frame", int(frame_index))
+
+
+def h5_stack_shape(frame_shape, n_frames, frame_axis):
+    ny, nx = tuple(int(value) for value in frame_shape)
+    n_frames = int(n_frames)
+
+    if frame_axis == 1:
+        return ny, n_frames, nx
+    if frame_axis == 2:
+        return ny, nx, n_frames
+    return n_frames, ny, nx
+
+
+def h5_stack_chunks(frame_shape, frame_axis):
+    ny, nx = tuple(int(value) for value in frame_shape)
+
+    if frame_axis == 1:
+        return ny, 1, nx
+    if frame_axis == 2:
+        return ny, nx, 1
+    return 1, ny, nx
+
+
+def write_h5_stack_frame(dataset, frame_axis, frame_index, image):
+    output = sanitize_cave_output_image(image)
+
+    if frame_axis == 1:
+        dataset[:, frame_index, :] = output
+    elif frame_axis == 2:
+        dataset[:, :, frame_index] = output
+    else:
+        dataset[frame_index, :, :] = output
+
+
+def create_h5_cave_stack_file(
+    filename: str,
+    frame_shape,
+    n_frames: int,
+    frame_axis,
+    source_file: str,
+    source_dataset_name: str,
+):
+    filename = Path(filename)
+    source_file = Path(source_file)
+    frame_axis = 0 if frame_axis is None else int(frame_axis)
+    n_frames = int(n_frames)
+
+    out = h5py.File(filename, "w")
+    try:
+        dataset = out.create_dataset(
+            "/entry_0000/instrument/eiger/data",
+            shape=h5_stack_shape(frame_shape, n_frames, frame_axis),
+            dtype=np.float32,
+            chunks=h5_stack_chunks(frame_shape, frame_axis),
+            compression="gzip",
+        )
+        add_h5_output_metadata(out, dataset, source_file, source_dataset_name)
+        set_h5_attr(out.attrs, "source_frames", int(n_frames))
+        set_h5_attr(out.attrs, "source_frame_axis", int(frame_axis))
+        set_h5_attr(dataset.attrs, "source_frames", int(n_frames))
+        set_h5_attr(dataset.attrs, "source_frame_axis", int(frame_axis))
+        return out, dataset
+    except Exception:
+        out.close()
+        raise
 
 
 def inspect_h5_image_dataset(filename: str):
@@ -1371,6 +1683,7 @@ class ManualCaveDialog(QDialog):
             self.load_mask_button,
             self.save_mask_button,
             self.apply_button,
+            self.multicave_button,
             self.close_button,
         ]:
             action_button.setMinimumHeight(28)
@@ -1379,6 +1692,8 @@ class ManualCaveDialog(QDialog):
         side.addWidget(self.load_mask_button)
         side.addWidget(self.save_mask_button)
         side.addWidget(self.apply_button)
+        side.addWidget(self.multicave_button)
+        side.addWidget(self.multicave_progress)
         side.addWidget(self.close_button)
         body.addLayout(side)
         layout.addLayout(body, 1)
@@ -2073,6 +2388,7 @@ class CaveTab(QWidget):
         self.h5_dataset_name = None
         self.h5_frame_axis = None
         self.h5_n_frames = 1
+        self._edf_frames = None
         self._syncing_folder = False
         self._syncing_frame_controls = False
         self._batch_cave_running = False
@@ -2394,12 +2710,14 @@ class CaveTab(QWidget):
         form_layout.addWidget(self.cave_angle_label, 3, 0)
         form_layout.addWidget(self.cave_angle_spin, 3, 1)
 
-        self.frame_label = QLabel("H5 frame:")
+        self.frame_label = QLabel("Frame:")
         self.frame_spin = QSpinBox()
         self.frame_spin.setRange(1, 1)
         self.frame_spin.setValue(1)
         self.frame_spin.setEnabled(False)
         self.frame_spin.hide()
+        form_layout.addWidget(self.frame_label, 4, 0)
+        form_layout.addWidget(self.frame_spin, 4, 1)
 
         controls_layout.addLayout(form_layout)
 
@@ -2460,6 +2778,11 @@ class CaveTab(QWidget):
                 padding-left: 4px;
             }
         """)
+
+        self.cave_scope_combo = QComboBox()
+        self.cave_scope_combo.addItems(["Current image", "All frames/scans in file"])
+        self.cave_scope_combo.setToolTip("Process only the current image or every frame/scan in the loaded file.")
+        self.cave_scope_combo.setFixedWidth(220)
         self.manual_mask_button.setStyleSheet(cave_action_button_style)
         self.manual_mask_button.setFixedHeight(cave_action_button_height)
         self.manual_mask_button.setCursor(Qt.PointingHandCursor)
@@ -2476,6 +2799,8 @@ class CaveTab(QWidget):
         controls_layout.addWidget(self.expand_nan_neighbors_checkbox)
         controls_layout.addWidget(self.manual_mask_button)
         controls_layout.addWidget(self.manual_mask_status_label)
+        controls_layout.addWidget(QLabel("Apply cave to:"))
+        controls_layout.addWidget(self.cave_scope_combo)
 
         intensity_box = QGroupBox("Contrast")
         intensity_box.setMinimumWidth(0)
@@ -2571,7 +2896,7 @@ class CaveTab(QWidget):
         self.yc_spin.valueChanged.connect(self.refresh_preview)
         self.beamstop_y_spin.valueChanged.connect(self.refresh_preview)
         self.cave_angle_spin.valueChanged.connect(self.refresh_preview)
-        self.frame_spin.valueChanged.connect(self.load_selected_h5_frame)
+        self.frame_spin.valueChanged.connect(self.load_selected_frame)
         self.nan_operator_combo.currentTextChanged.connect(self.refresh_preview)
         self.nan_threshold_spin.valueChanged.connect(self.refresh_preview)
         self.nan_threshold_spin.editingFinished.connect(self.refresh_preview)
@@ -2584,7 +2909,8 @@ class CaveTab(QWidget):
         self.vmin_slider.valueChanged.connect(self.update_display_limits_from_sliders)
         self.vmax_slider.valueChanged.connect(self.update_display_limits_from_sliders)
 
-        frame_nav = QHBoxLayout()
+        self.frame_nav_container = QWidget()
+        frame_nav = QHBoxLayout(self.frame_nav_container)
         frame_nav.setContentsMargins(0, 0, 0, 0)
         frame_nav.setSpacing(FRAME_NAV_SPACING)
 
@@ -2615,7 +2941,7 @@ class CaveTab(QWidget):
         frame_nav.addWidget(QLabel("End:"))
         frame_nav.addWidget(self.frame_end_spin)
         frame_nav.addWidget(self.frame_counter_label)
-        main_layout.addLayout(frame_nav, stretch=0)
+        main_layout.addWidget(self.frame_nav_container, stretch=0)
 
         self.frame_start_spin.valueChanged.connect(self.update_frame_bounds)
         self.frame_end_spin.valueChanged.connect(self.update_frame_bounds)
@@ -3067,8 +3393,11 @@ class CaveTab(QWidget):
         self.id13_beamstop_checkbox.blockSignals(False)
 
     def update_frame_selector_visibility(self):
-        self.frame_label.setVisible(False)
-        self.frame_spin.setVisible(False)
+        has_multiple_frames = max(1, int(getattr(self, "h5_n_frames", 1) or 1)) > 1
+        self.frame_label.setVisible(has_multiple_frames)
+        self.frame_spin.setVisible(has_multiple_frames)
+        if hasattr(self, "frame_nav_container"):
+            self.frame_nav_container.setVisible(has_multiple_frames)
         self.update_frame_counter()
 
     def configure_frame_navigation(self, n_frames):
@@ -3143,7 +3472,7 @@ class CaveTab(QWidget):
         total = max(1, self.h5_n_frames)
         self.frame_counter_label.setText(f"{current} / {total}")
         if hasattr(self, "prev_frame_button"):
-            can_navigate = self.file_type == "H5" and total > 1
+            can_navigate = total > 1 and self.file_type in {"H5", "EDF"}
             self.frame_spin.setEnabled(can_navigate)
             self.frame_start_spin.setEnabled(can_navigate)
             self.frame_end_spin.setEnabled(can_navigate)
@@ -3343,6 +3672,8 @@ class CaveTab(QWidget):
         for path in iterator:
             if not path.is_file():
                 continue
+            if should_hide_file_in_browser(path):
+                continue
 
             lower_name = path.name.lower()
             lower_stem = path.stem.lower()
@@ -3416,15 +3747,16 @@ class CaveTab(QWidget):
             suffix = path.suffix.lower()
 
             if suffix == ".edf":
-                image, header, raw_header_text, byte_order = read_edf_file(file_path)
+                image, header, raw_header_text, byte_order, n_frames = read_edf_frame(file_path, 0)
                 self.file_type = "EDF"
                 self.raw_header_text = raw_header_text
                 self.byte_order = byte_order
                 self.h5_dataset_name = None
                 self.h5_frame_axis = None
-                self.h5_n_frames = 1
+                self.h5_n_frames = n_frames
+                self._edf_frames = None
 
-                self.configure_frame_navigation(1)
+                self.configure_frame_navigation(self.h5_n_frames)
             elif suffix in [".h5", ".hdf5"]:
                 dataset_name, dataset_shape, frame_axis, n_frames, header = inspect_h5_image_dataset(file_path)
                 image, header = read_h5_frame(file_path, dataset_name, 0)
@@ -3466,9 +3798,43 @@ class CaveTab(QWidget):
         except Exception as error:
             QMessageBox.critical(self, "File reading error", str(error))
 
-    def load_selected_h5_frame(self):
+    def load_selected_frame(self):
         self.update_frame_counter()
-        if self.file_type != "H5" or self.current_file is None or self.h5_dataset_name is None:
+        if self.current_file is None:
+            return
+
+        if self.file_type == "EDF":
+            frame_index = self.frame_spin.value() - 1
+            try:
+                image, header, raw_header_text, byte_order, n_frames = read_edf_frame(self.current_file, frame_index)
+                self.h5_n_frames = n_frames
+                self.header = header
+                self.raw_header_text = raw_header_text
+                self.byte_order = byte_order
+                self.image = image.astype(np.float64)
+                self.image_clean = None
+                self.image_filled = None
+                self.cave_mask = None
+                self.manual_cave_shapes = []
+                self.manual_cave_exclusion_shapes = []
+                self.manual_cave_pre_nan_shapes = []
+                self.update_manual_mask_status_label()
+
+                if not self.lock_intensity_checkbox.isChecked():
+                    self.auto_set_display_limits()
+
+                self.apply_instrument_preset()
+                self.update_beamstop_visibility()
+                self.update_frame_selector_visibility()
+                self.refresh_preview()
+                self.update_manual_mask_button_state()
+                self.update_status()
+
+            except Exception as error:
+                QMessageBox.critical(self, "Frame reading error", str(error))
+            return
+
+        if self.file_type != "H5" or self.h5_dataset_name is None:
             return
 
         frame_index = self.frame_spin.value() - 1
@@ -3498,6 +3864,9 @@ class CaveTab(QWidget):
         except Exception as error:
             QMessageBox.critical(self, "Frame reading error", str(error))
 
+    def load_selected_h5_frame(self):
+        self.load_selected_frame()
+
     def manual_mask_for_shape(self, shape, mode="include"):
         shapes_by_mode = {
             "include": self.manual_cave_shapes,
@@ -3519,7 +3888,53 @@ class CaveTab(QWidget):
 
         return mask
 
-    def batch_cave_single_file_fast(self, path):
+    def cave_filled_image_for(self, image):
+        image = image.astype(np.float64)
+        extra_operator, extra_threshold = self.extra_nan_condition()
+        use_id13_beamstop = self.instrument_mode == "ID13" and self.id13_beamstop_checkbox.isChecked()
+
+        _clean, filled, _mask = apply_central_symmetry_cave(
+            image,
+            self.xc_spin.value(),
+            self.yc_spin.value(),
+            nan_operator=self.nan_operator_combo.currentText(),
+            nan_threshold=self.nan_threshold_spin.value(),
+            nan_operator_2=extra_operator,
+            nan_threshold_2=extra_threshold,
+            use_id13_beamstop=use_id13_beamstop,
+            beamstop_y=self.beamstop_y_spin.value(),
+            reference_angle_deg=self.cave_angle_spin.value(),
+            expand_nan_neighbors=self.expand_nan_neighbors_checkbox.isChecked(),
+            pre_nan_mask=self.manual_mask_for_shape(image.shape, "pre_nan"),
+            extra_mask=self.manual_mask_for_shape(image.shape, "include"),
+            exclude_mask=self.manual_mask_for_shape(image.shape, "exclude"),
+        )
+
+        return filled
+
+    def write_cave_h5_stack(self, path, dataset_name, frame_axis, n_frames, output_path, progress_callback=None):
+        first_image, _header = read_h5_frame(path, dataset_name, 0)
+        output_h5, output_dataset = create_h5_cave_stack_file(
+            output_path,
+            first_image.shape,
+            n_frames,
+            frame_axis,
+            path,
+            dataset_name,
+        )
+        try:
+            for frame_index in range(int(n_frames)):
+                image = first_image if frame_index == 0 else read_h5_frame(path, dataset_name, frame_index)[0]
+                filled = self.cave_filled_image_for(image)
+                write_h5_stack_frame(output_dataset, frame_axis, frame_index, filled)
+                if progress_callback is not None:
+                    progress_callback(frame_index + 1)
+        finally:
+            output_h5.close()
+
+        return output_path
+
+    def batch_cave_single_file_fast(self, path, progress_callback=None):
         path = Path(path)
         suffix = path.suffix.lower()
         self.commit_nan_threshold_edits()
@@ -3528,40 +3943,10 @@ class CaveTab(QWidget):
         use_id13_beamstop = self.instrument_mode == "ID13" and self.id13_beamstop_checkbox.isChecked()
 
         if suffix == ".edf":
-            image, header, raw_header_text, byte_order = read_edf_file(path)
-            image = image.astype(np.float64)
-
-            _clean, filled, _mask = apply_central_symmetry_cave(
-                image,
-                self.xc_spin.value(),
-                self.yc_spin.value(),
-                nan_operator=self.nan_operator_combo.currentText(),
-                nan_threshold=self.nan_threshold_spin.value(),
-                nan_operator_2=extra_operator,
-                nan_threshold_2=extra_threshold,
-                use_id13_beamstop=use_id13_beamstop,
-                beamstop_y=self.beamstop_y_spin.value(),
-                reference_angle_deg=self.cave_angle_spin.value(),
-                expand_nan_neighbors=self.expand_nan_neighbors_checkbox.isChecked(),
-                pre_nan_mask=self.manual_mask_for_shape(image.shape, "pre_nan"),
-                extra_mask=self.manual_mask_for_shape(image.shape, "include"),
-                exclude_mask=self.manual_mask_for_shape(image.shape, "exclude"),
-            )
-
-            output_path = path.parent / f"{path.stem}_cave.edf"
-            write_edf_file(output_path, sanitize_cave_output_image(filled), raw_header_text, byte_order)
-            return output_path
-
-        if suffix in [".h5", ".hdf5"]:
-            dataset_name, _dataset_shape, _frame_axis, n_frames, _header = inspect_h5_image_dataset(path)
-            start_frame = max(1, self.frame_start_spin.value())
-            end_frame = min(int(n_frames), self.frame_end_spin.value())
-            if start_frame > end_frame:
-                start_frame, end_frame = end_frame, start_frame
-
+            targets = self.cave_processing_targets(path)
+            _, _, raw_header_text, byte_order = read_edf_frames(path) if self.cave_scope_is_all() else read_edf_file(path)
             saved_paths = []
-            for frame_number in range(start_frame, end_frame + 1):
-                image, _header = read_h5_frame(path, dataset_name, frame_number - 1)
+            for frame_number, image in targets:
                 image = image.astype(np.float64)
 
                 _clean, filled, _mask = apply_central_symmetry_cave(
@@ -3581,10 +3966,48 @@ class CaveTab(QWidget):
                     exclude_mask=self.manual_mask_for_shape(image.shape, "exclude"),
                 )
 
+                is_current_loaded_file = (
+                    self.current_file is not None
+                    and Path(self.current_file).resolve() == path.resolve()
+                )
+                frame_suffix = (
+                    f"_frame{frame_number + 1:04d}"
+                    if (self.cave_scope_is_all() and len(targets) > 1)
+                    or (is_current_loaded_file and self.h5_n_frames > 1)
+                    else ""
+                )
+                output_path = path.parent / f"{path.stem}{frame_suffix}_cave.edf"
+                write_edf_file(output_path, sanitize_cave_output_image(filled), raw_header_text, byte_order)
+                saved_paths.append(output_path)
+                if progress_callback is not None:
+                    progress_callback()
+
+            return saved_paths[-1] if saved_paths else None
+
+        if suffix in [".h5", ".hdf5"]:
+            dataset_name, _dataset_shape, frame_axis, n_frames, _header = inspect_h5_image_dataset(path)
+            if self.cave_scope_is_all() and int(n_frames) > 1:
+                output_path = path.parent / f"{path.stem}_cave.h5"
+                self.write_cave_h5_stack(
+                    path,
+                    dataset_name,
+                    frame_axis,
+                    n_frames,
+                    output_path,
+                    progress_callback=lambda _current: progress_callback() if progress_callback is not None else None,
+                )
+                return output_path
+
+            saved_paths = []
+            for frame_number, image in self.cave_processing_targets(path):
+                filled = self.cave_filled_image_for(image)
+
                 frame_suffix = f"_frame{frame_number:04d}" if int(n_frames) > 1 else ""
                 output_path = path.parent / f"{path.stem}{frame_suffix}_cave.h5"
                 write_h5_frame_file(output_path, filled, path, dataset_name, frame_number - 1)
                 saved_paths.append(output_path)
+                if progress_callback is not None:
+                    progress_callback()
 
             return saved_paths[-1] if saved_paths else None
 
@@ -3598,6 +4021,80 @@ class CaveTab(QWidget):
                 path = self.current_folder / item.text()
             paths.append(Path(path))
         return paths
+
+    def cave_progress_total_for_path(self, path):
+        path = Path(path)
+        if not self.cave_scope_is_all():
+            return 1
+
+        suffix = path.suffix.lower()
+        if suffix == ".edf":
+            frames, *_ = read_edf_frames(path)
+            return max(1, len(frames))
+
+        if suffix in [".h5", ".hdf5"]:
+            _dataset_name, _dataset_shape, _frame_axis, n_frames, _header = inspect_h5_image_dataset(path)
+            return max(1, int(n_frames))
+
+        return 1
+
+    def start_cave_progress(self, total, text="0 / {total}"):
+        total = max(1, int(total))
+        self.batch_progress.setVisible(True)
+        self.batch_progress.setRange(0, total)
+        self.batch_progress.setValue(0)
+        self.batch_progress.setFormat(text.format(current=0, total=total))
+        QCoreApplication.processEvents()
+
+    def update_cave_progress(self, current, total, text="{current} / {total}"):
+        total = max(1, int(total))
+        current = max(0, min(int(current), total))
+        self.batch_progress.setValue(current)
+        self.batch_progress.setFormat(text.format(current=current, total=total))
+        QCoreApplication.processEvents()
+
+    def stop_cave_progress(self):
+        self.batch_progress.setVisible(False)
+
+    def current_cave_scope(self):
+        if hasattr(self, "cave_scope_combo"):
+            return self.cave_scope_combo.currentText()
+        return "Current image"
+
+    def cave_scope_is_all(self):
+        return self.current_cave_scope() == "All frames/scans in file"
+
+    def cave_processing_targets(self, path):
+        path = Path(path)
+        suffix = path.suffix.lower()
+
+        if suffix == ".edf":
+            if self.cave_scope_is_all():
+                frames, *_ = read_edf_frames(path)
+                return [(index, frame) for index, frame in enumerate(frames)]
+
+            if self.current_file is not None and Path(self.current_file).resolve() == path.resolve() and self.image is not None:
+                return [(max(0, self.frame_spin.value() - 1), self.image)]
+
+            image, *_ = read_edf_file(path)
+            return [(0, image)]
+
+        if suffix in [".h5", ".hdf5"]:
+            dataset_name, _dataset_shape, _frame_axis, n_frames, _header = inspect_h5_image_dataset(path)
+            if self.cave_scope_is_all():
+                frames = []
+                for frame_number in range(1, int(n_frames) + 1):
+                    image, _header = read_h5_frame(path, dataset_name, frame_number - 1)
+                    frames.append((frame_number, image))
+                return frames
+
+            current_frame = 0
+            if self.current_file is not None and Path(self.current_file).resolve() == path.resolve() and self.file_type == "H5":
+                current_frame = max(0, min(self.frame_spin.value() - 1, int(n_frames) - 1))
+            image, _header = read_h5_frame(path, dataset_name, current_frame)
+            return [(current_frame + 1, image)]
+
+        raise ValueError(f"Unsupported file format: {path.suffix}")
 
     def cave_selected_files(self):
         paths = self.selected_file_paths_for_batch()
@@ -3613,28 +4110,34 @@ class CaveTab(QWidget):
         self.run_button.setEnabled(False)
         self.save_button.setEnabled(False)
 
-        self.batch_progress.setVisible(True)
-        self.batch_progress.setRange(0, len(paths))
-        self.batch_progress.setValue(0)
-        self.batch_progress.setFormat(f"0 / {len(paths)}")
-        QCoreApplication.processEvents()
-
         original_file = self.current_file
         original_frame = self.frame_spin.value() if hasattr(self, "frame_spin") else 1
         saved_count = 0
         errors = []
+        total_units = 0
+        completed_units = 0
 
         try:
+            for path in paths:
+                try:
+                    total_units += self.cave_progress_total_for_path(path)
+                except Exception:
+                    total_units += 1
+            self.start_cave_progress(total_units, "Cave: {current} / {total}")
+
+            def advance_progress():
+                nonlocal completed_units
+                completed_units += 1
+                self.update_cave_progress(completed_units, total_units, "Cave: {current} / {total}")
+
             for i, path in enumerate(paths, 1):
                 try:
-                    self.batch_cave_single_file_fast(path)
+                    self.batch_cave_single_file_fast(path, progress_callback=advance_progress)
                     saved_count += 1
                 except Exception as error:
                     errors.append(f"{path.name}: {error}")
-
-                self.batch_progress.setValue(i)
-                self.batch_progress.setFormat(f"{i} / {len(paths)}")
-                QCoreApplication.processEvents()
+                    if not self.cave_scope_is_all():
+                        advance_progress()
 
             if original_file is not None and Path(original_file).exists():
                 try:
@@ -3657,7 +4160,7 @@ class CaveTab(QWidget):
                 QMessageBox.information(self, "Cave selected", message)
         finally:
             self._batch_cave_running = False
-            self.batch_progress.setVisible(False)
+            self.stop_cave_progress()
             self.run_button.setEnabled(self.image is not None)
             self.save_button.setEnabled(self.image is not None)
             self.batch_cave_button.setEnabled(self.image is not None)
@@ -3726,28 +4229,79 @@ class CaveTab(QWidget):
             return
 
         if self.file_type == "EDF":
-            output_path = self.current_file.parent / f"{self.current_file.stem}_cave.edf"
-
             try:
-                write_edf_file(output_path, sanitize_cave_output_image(self.image_filled), self.raw_header_text, self.byte_order)
-                self.status.append(f"\nSaved cave EDF:\n{output_path}")
+                if self.cave_scope_is_all():
+                    frames, _, raw_header_text, byte_order = read_edf_frames(self.current_file)
+                    total_frames = max(1, len(frames))
+                    self.start_cave_progress(total_frames, "Cave: {current} / {total}")
+                    saved_paths = []
+                    for frame_number, frame in enumerate(frames):
+                        _, filled, _ = apply_central_symmetry_cave(
+                            frame.astype(np.float64),
+                            self.xc_spin.value(),
+                            self.yc_spin.value(),
+                            nan_operator=self.nan_operator_combo.currentText(),
+                            nan_threshold=self.nan_threshold_spin.value(),
+                            nan_operator_2=self.extra_nan_condition()[0],
+                            nan_threshold_2=self.extra_nan_condition()[1],
+                            use_id13_beamstop=self.instrument_mode == "ID13" and self.id13_beamstop_checkbox.isChecked(),
+                            beamstop_y=self.beamstop_y_spin.value(),
+                            reference_angle_deg=self.cave_angle_spin.value(),
+                            expand_nan_neighbors=self.expand_nan_neighbors_checkbox.isChecked(),
+                            pre_nan_mask=self.manual_mask_for_shape(frame.shape, "pre_nan"),
+                            extra_mask=self.manual_mask_for_shape(frame.shape, "include"),
+                            exclude_mask=self.manual_mask_for_shape(frame.shape, "exclude"),
+                        )
+                        frame_suffix = f"_frame{frame_number + 1:04d}" if len(frames) > 1 else ""
+                        output_path = self.current_file.parent / f"{self.current_file.stem}{frame_suffix}_cave.edf"
+                        write_edf_file(output_path, sanitize_cave_output_image(filled), raw_header_text, byte_order)
+                        saved_paths.append(output_path)
+                        self.update_cave_progress(frame_number + 1, total_frames, "Cave: {current} / {total}")
+                    self.stop_cave_progress()
+                    self.status.append(f"\nSaved cave EDF(s):\n" + "\n".join(str(path) for path in saved_paths))
+                else:
+                    frame_suffix = f"_frame{self.frame_spin.value():04d}" if self.h5_n_frames > 1 else ""
+                    output_path = self.current_file.parent / f"{self.current_file.stem}{frame_suffix}_cave.edf"
+                    write_edf_file(output_path, sanitize_cave_output_image(self.image_filled), self.raw_header_text, self.byte_order)
+                    self.status.append(f"\nSaved cave EDF:\n{output_path}")
             except Exception as error:
+                self.stop_cave_progress()
                 QMessageBox.critical(self, "Save error", str(error))
 
         else:
-            frame_suffix = f"_frame{self.frame_spin.value():04d}" if self.h5_n_frames > 1 else ""
-            output_path = self.current_file.parent / f"{self.current_file.stem}{frame_suffix}_cave.h5"
-
             try:
-                write_h5_frame_file(
-                    output_path,
-                    self.image_filled,
-                    self.current_file,
-                    self.h5_dataset_name or "data",
-                    self.frame_spin.value() - 1,
-                )
-                self.status.append(f"\nSaved cave H5:\n{output_path}")
+                if self.cave_scope_is_all():
+                    dataset_name, _dataset_shape, frame_axis, n_frames, _header = inspect_h5_image_dataset(self.current_file)
+                    total_frames = max(1, int(self.h5_n_frames))
+                    self.start_cave_progress(total_frames, "Cave: {current} / {total}")
+                    output_path = self.current_file.parent / f"{self.current_file.stem}_cave.h5"
+                    self.write_cave_h5_stack(
+                        self.current_file,
+                        dataset_name,
+                        frame_axis,
+                        n_frames,
+                        output_path,
+                        progress_callback=lambda current: self.update_cave_progress(
+                            current,
+                            total_frames,
+                            "Cave: {current} / {total}",
+                        ),
+                    )
+                    self.stop_cave_progress()
+                    self.status.append(f"\nSaved cave H5:\n{output_path}")
+                else:
+                    frame_suffix = f"_frame{self.frame_spin.value():04d}" if self.h5_n_frames > 1 else ""
+                    output_path = self.current_file.parent / f"{self.current_file.stem}{frame_suffix}_cave.h5"
+                    write_h5_frame_file(
+                        output_path,
+                        self.image_filled,
+                        self.current_file,
+                        self.h5_dataset_name or "data",
+                        self.frame_spin.value() - 1,
+                    )
+                    self.status.append(f"\nSaved cave H5:\n{output_path}")
             except Exception as error:
+                self.stop_cave_progress()
                 QMessageBox.critical(self, "Save error", str(error))
 
     def update_status(self):
@@ -3761,6 +4315,8 @@ class CaveTab(QWidget):
 
         if self.file_type == "H5" and "Dataset" in self.header:
             lines.append(f"Dataset: {self.header['Dataset']}")
+
+        if self.file_type in {"EDF", "H5"} and self.h5_n_frames > 1:
             lines.append(f"Frame: {self.frame_spin.value()} / {self.h5_n_frames}")
             if self.h5_frame_axis is not None:
                 lines.append(f"Frame axis: {self.h5_frame_axis}")

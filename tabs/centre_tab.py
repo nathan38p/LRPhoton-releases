@@ -39,7 +39,7 @@ from .ui_style import (
     normalize_decimal_text,
     style_q_geometry_buttons,
 )
-from .file_ratings import install_file_rating_menu, is_file_rated_up, set_item_file_path
+from .file_ratings import install_file_rating_menu, is_file_rated_up, set_item_file_path, should_hide_file_in_browser
 from .line_geometry import LineGeometrySelector, line_geometry_to_lrphoton
 
 
@@ -47,6 +47,7 @@ from .line_geometry import LineGeometrySelector, line_geometry_to_lrphoton
 # ======================= EDF TOOLS ==========================
 # Everything is kept in this tab: no utils folder.
 # ============================================================
+
 
 def parse_edf_header(header_text: str) -> dict:
     i1 = header_text.find("{")
@@ -64,6 +65,25 @@ def parse_edf_header(header_text: str) -> dict:
             header[k.strip()] = v.strip()
 
     return header
+
+
+# Helper to infer EDF header size from a string containing the start of the file
+def infer_edf_header_size(first_chunk: str) -> int:
+    match = re.search(r"EDF_HeaderSize\s*[:=]\s*(\d+)", first_chunk)
+    if match:
+        return int(match.group(1))
+
+    closing = first_chunk.find("}")
+    if closing < 0:
+        raise ValueError("EDF header size not found and closing brace not found.")
+
+    header_end = closing + 1
+    for boundary in (1024, 512, 256):
+        padded_size = int(np.ceil(header_end / boundary) * boundary)
+        if padded_size <= len(first_chunk):
+            return padded_size
+
+    return header_end
 
 
 def edf_dtype_to_numpy(data_type: str):
@@ -95,11 +115,7 @@ def read_edf_file(filename: str):
     with open(filename, "rb") as f:
         first = f.read(8192).decode("latin-1", errors="ignore")
 
-    m = re.search(r"EDF_HeaderSize\s*=\s*(\d+)", first)
-    if not m:
-        raise ValueError("EDF_HeaderSize not found in header.")
-
-    header_size = int(m.group(1))
+    header_size = infer_edf_header_size(first)
 
     with open(filename, "rb") as f:
         raw_header_bytes = f.read(header_size)
@@ -742,7 +758,6 @@ class CentreTab(QWidget):
         self._syncing_folder = False
 
         self._build_ui(default_xc, default_yc)
-        self.refresh_files()
 
     def _build_ui(self, default_xc, default_yc):
         main = QGridLayout(self)
@@ -1419,6 +1434,8 @@ class CentreTab(QWidget):
         files = []
         for path in iterator:
             if not path.is_file():
+                continue
+            if should_hide_file_in_browser(path):
                 continue
             lower_name = path.name.lower()
             if not any(fnmatch.fnmatch(lower_name, pattern.lower()) for pattern in extension_patterns):

@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import h5py
 import numpy as np
 
 from PySide6.QtCore import Qt, QEvent, QRectF, Signal, QMimeData, QTimer
@@ -44,7 +45,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 
-from .file_ratings import install_file_rating_menu, is_file_rated_up, set_item_file_path
+from .file_ratings import install_file_rating_menu, is_file_rated_up, set_item_file_path, should_hide_file_in_browser
 from .ui_style import (
     BLOCK_SPACING,
     FILE_BROWSER_WIDTH,
@@ -91,6 +92,135 @@ def read_dat_curve(file_path):
     curves = read_dat_curves(file_path)
     first = curves[0]
     return first["x"], first["y"]
+
+
+def read_curve_file(file_path):
+    suffix = Path(file_path).suffix.lower()
+    if suffix in {".h5", ".hdf5"}:
+        return read_h5_curves(file_path)
+    return read_dat_curves(file_path)
+
+
+def _h5_attr_text(value):
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="ignore")
+    if isinstance(value, np.ndarray) and value.size == 1:
+        return _h5_attr_text(value.reshape(-1)[0])
+    return str(value)
+
+
+def _h5_dataset_label(name, dataset):
+    label = dataset.attrs.get("long_name") or dataset.attrs.get("title") or dataset.attrs.get("name")
+    if label is not None:
+        text = _h5_attr_text(label).strip()
+        if text:
+            return text
+    return Path(name).name or name
+
+
+def _h5_dataset_unit(dataset):
+    unit = dataset.attrs.get("units") or dataset.attrs.get("unit")
+    if unit is None:
+        return ""
+    return _h5_attr_text(unit).strip()
+
+
+def _h5_curve_label(name, dataset):
+    label = _h5_dataset_label(name, dataset)
+    unit = _h5_dataset_unit(dataset)
+    return f"{label} / {unit}" if unit else label
+
+
+def _h5_dataset_score(name, dataset, preferred_terms):
+    lower = name.lower()
+    score = 0
+    for index, term in enumerate(preferred_terms):
+        if term in lower:
+            score += 100 - index
+    if dataset.ndim == 1:
+        score += 10
+    return score
+
+
+def _finite_sorted_curve(x, y):
+    x = np.asarray(x, dtype=float).reshape(-1)
+    y = np.asarray(y, dtype=float).reshape(-1)
+    size = min(x.size, y.size)
+    x = x[:size]
+    y = y[:size]
+    valid = np.isfinite(x) & np.isfinite(y)
+    x = x[valid]
+    y = y[valid]
+    if x.size < 2:
+        raise ValueError("No finite x/y curve found in this H5 file.")
+    order = np.argsort(x)
+    return x[order], y[order]
+
+
+def read_h5_curves(file_path):
+    file_path = Path(file_path)
+
+    with h5py.File(file_path, "r") as h5:
+        datasets = []
+
+        def collect_dataset(name, obj):
+            if isinstance(obj, h5py.Dataset) and np.issubdtype(obj.dtype, np.number):
+                datasets.append((name, obj))
+
+        h5.visititems(collect_dataset)
+
+        if not datasets:
+            raise ValueError("No numerical dataset found in this H5 file.")
+
+        one_dimensional = [(name, dataset) for name, dataset in datasets if dataset.ndim == 1 and dataset.size >= 2]
+        if len(one_dimensional) >= 2:
+            x_terms = ("q", "radial", "axis", "x")
+            y_terms = ("intensity", "i_q", "i(q)", "signal", "data", "counts", "y")
+            x_name, x_dataset = max(one_dimensional, key=lambda item: _h5_dataset_score(item[0], item[1], x_terms))
+            y_candidates = [(name, dataset) for name, dataset in one_dimensional if name != x_name and dataset.shape == x_dataset.shape]
+            if y_candidates:
+                y_name, y_dataset = max(y_candidates, key=lambda item: _h5_dataset_score(item[0], item[1], y_terms))
+                x, y = _finite_sorted_curve(np.asarray(x_dataset[...]), np.asarray(y_dataset[...]))
+                return [
+                    {
+                        "x": x,
+                        "y": y,
+                        "legend": file_path.stem,
+                        "axis": "left",
+                        "x_label": _h5_curve_label(x_name, x_dataset),
+                        "y_label": _h5_curve_label(y_name, y_dataset),
+                        "manual_dataset": False,
+                    }
+                ]
+
+        two_column = [
+            (name, dataset)
+            for name, dataset in datasets
+            if dataset.ndim == 2 and 2 in dataset.shape and max(dataset.shape) >= 2
+        ]
+        if two_column:
+            y_terms = ("intensity", "i_q", "i(q)", "signal", "data", "curve")
+            name, dataset = max(two_column, key=lambda item: _h5_dataset_score(item[0], item[1], y_terms))
+            array = np.asarray(dataset[...], dtype=float)
+            if array.shape[1] == 2:
+                x, y = _finite_sorted_curve(array[:, 0], array[:, 1])
+            elif array.shape[0] == 2:
+                x, y = _finite_sorted_curve(array[0, :], array[1, :])
+            else:
+                raise ValueError("No two-column curve dataset found in this H5 file.")
+            return [
+                {
+                    "x": x,
+                    "y": y,
+                    "legend": file_path.stem,
+                    "axis": "left",
+                    "x_label": "q",
+                    "y_label": _h5_curve_label(name, dataset),
+                    "manual_dataset": False,
+                }
+            ]
+
+    raise ValueError("No compatible 1D curve found in this H5 file.")
 
 
 def read_dat_curves(file_path):
@@ -583,7 +713,6 @@ class DatPlotTab(QWidget):
         self.extra_axes = {}
 
         self.build_ui()
-        self.refresh_files()
 
     def load_saved_legends(self):
         path = _legend_store_path()
@@ -692,7 +821,7 @@ class DatPlotTab(QWidget):
         file_layout.addWidget(self.browse_button)
 
         filters_layout = QGridLayout()
-        self.extensions_filter = QLineEdit("*.dat")
+        self.extensions_filter = QLineEdit("*.dat *_ave.h5")
         self.name_filter = QLineEdit("**")
         self.extensions_filter.textChanged.connect(self.refresh_files)
         self.name_filter.textChanged.connect(self.refresh_files)
@@ -1564,7 +1693,7 @@ class DatPlotTab(QWidget):
 
         patterns = self.extensions_filter.text().split()
         if not patterns:
-            patterns = ["*.dat"]
+            patterns = ["*.dat", "*_ave.h5"]
 
         name_filter = self.name_filter.text().strip()
         if not name_filter:
@@ -1578,7 +1707,12 @@ class DatPlotTab(QWidget):
             files.extend(glob_method(pattern))
 
         files = sorted(set(files))
-        files = [file for file in files if file.is_file() and fnmatch(file.name, name_filter)]
+        files = [
+            file for file in files
+            if file.is_file()
+            and not should_hide_file_in_browser(file)
+            and fnmatch(file.name, name_filter)
+        ]
         if self.only_thumbs_up_checkbox.isChecked():
             files = [file for file in files if is_file_rated_up(file)]
 
@@ -1599,7 +1733,7 @@ class DatPlotTab(QWidget):
 
         for file_path in selected:
             try:
-                loaded_curves = read_dat_curves(file_path)
+                loaded_curves = read_curve_file(file_path)
             except Exception as error:
                 QMessageBox.warning(self, "File reading error", f"{file_path.name}\n\n{error}")
                 continue

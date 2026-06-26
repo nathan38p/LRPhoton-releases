@@ -53,6 +53,12 @@ except Exception:
         item.setData(Qt.UserRole, str(path))
 
 try:
+    from tabs.file_ratings import should_hide_file_in_browser
+except Exception:
+    def should_hide_file_in_browser(_path):
+        return False
+
+try:
     from tabs.ui_style import FILE_BROWSER_WIDTH, PAGE_MARGINS
 except Exception:
     FILE_BROWSER_WIDTH = 320
@@ -684,6 +690,8 @@ class ToolsTab(QWidget):
 
         for path in iterator:
             if not path.is_file():
+                continue
+            if should_hide_file_in_browser(path):
                 continue
             if path.suffix.lower() not in candidate_suffixes:
                 continue

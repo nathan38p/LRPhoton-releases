@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^cd /Users/nathanpiaget/Documents/Thèse\\\\ LRP/Programmes/LRPhoton && python3 - <<'PY'\nfrom pathlib import Path\nimport importlib\\.util\nroot = Path\\('\\.'\\)\\.resolve\\(\\)\nspec = importlib\\.util\\.spec_from_file_location\\('radial_tab', root / 'tabs' / 'radial_tab\\.py'\\)\nmod = importlib\\.util\\.module_from_spec\\(spec\\)\nspec\\.loader\\.exec_module\\(mod\\)\nheader_text = '''\\{\nSeries_ID: 21 ;\nImage_ID: 0 ;\nCenter_1: 612\\.199 ;\nCenter_2: 647\\.162 ;\nPSize_1: 7\\.5e-05 ;\nPSize_2: 7\\.5e-05 ;\nWaveLength: 1\\.54189e-10 ;\nSampleDistance: 0\\.9 ;\n\\}'''\nheader = mod\\.parse_edf_header\\(header_text\\)\nprint\\(header\\['Center_1'\\]\\)\nprint\\(header\\['PSize_1'\\]\\)\nprint\\(header\\['WaveLength'\\]\\)\nprint\\(header\\['SampleDistance'\\]\\)\nPY$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

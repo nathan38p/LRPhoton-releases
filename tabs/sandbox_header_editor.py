@@ -35,7 +35,7 @@ from tabs.ui_style import (
     GROUP_BOX_STYLE,
     PAGE_MARGINS,
 )
-from tabs.file_ratings import install_file_rating_menu, set_item_file_path
+from tabs.file_ratings import install_file_rating_menu, set_item_file_path, should_hide_file_in_browser
 
 try:
     import fabio
@@ -210,7 +210,6 @@ class HeaderEditorTab(QWidget):
         self.info_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         info_layout.addWidget(self.info_label, 1)
 
-        self.refresh_files()
         self.update_buttons()
 
     def folder_from_text(self):
@@ -248,6 +247,8 @@ class HeaderEditorTab(QWidget):
         files = []
         for path in iterator:
             if not path.is_file():
+                continue
+            if should_hide_file_in_browser(path):
                 continue
             lower_name = path.name.lower()
             if not any(fnmatch.fnmatch(lower_name, pattern.lower()) for pattern in extension_patterns):

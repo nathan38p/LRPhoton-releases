@@ -45,7 +45,7 @@ from .instrument_presets import (
     ID13_DEFAULT_PIXEL_MM,
     ID13_DEFAULT_WAVELENGTH_A,
 )
-from .file_ratings import file_path_from_item, install_file_rating_menu, is_file_rated_up, set_item_file_path
+from .file_ratings import file_path_from_item, install_file_rating_menu, is_file_rated_up, set_item_file_path, should_hide_file_in_browser
 from .line_geometry import LineGeometrySelector, line_geometry_to_lrphoton
 from .ui_style import (
     BLOCK_SPACING,
@@ -1850,7 +1850,11 @@ class HermansTab(QWidget):
 
         from fnmatch import fnmatch
         files = sorted(set(files))
-        files = [file for file in files if fnmatch(file.name, name_filter)]
+        files = [
+            file for file in files
+            if not should_hide_file_in_browser(file)
+            and fnmatch(file.name, name_filter)
+        ]
         if self.only_thumbs_up_checkbox.isChecked():
             files = [file for file in files if is_file_rated_up(file)]
 

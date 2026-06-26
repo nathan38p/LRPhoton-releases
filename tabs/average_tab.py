@@ -48,7 +48,7 @@ from .ui_style import (
     PAGE_MARGINS,
     PANEL_MARGINS,
 )
-from .file_ratings import install_file_rating_menu, is_file_rated_up, set_item_file_path
+from .file_ratings import install_file_rating_menu, is_file_rated_up, set_item_file_path, should_hide_file_in_browser
 
 
 def write_average_h5_file(filename: str, image: np.ndarray, source_files, start_frame: int, end_frame: int):
@@ -85,7 +85,6 @@ class AverageTab(QWidget):
         self.selected_files_as_images = False
 
         self.build_ui()
-        self.refresh_files()
         self.set_controls_enabled(False)
 
     def build_ui(self):
@@ -465,6 +464,8 @@ class AverageTab(QWidget):
         files = []
         for path in iterator:
             if not path.is_file():
+                continue
+            if should_hide_file_in_browser(path):
                 continue
             lower_name = path.name.lower()
             if "azim" in lower_name:

@@ -90,6 +90,16 @@ def file_prefix_icon(file_path, rating=None):
     return _DEFAULT_FILE_ICON
 
 
+def should_hide_file_in_browser(file_path):
+    path = Path(str(file_path))
+    name = path.name.lower()
+    if name.startswith("._") or name == ".ds_store":
+        return True
+    if name.endswith("cleannan.edf"):
+        return True
+    return path.suffix.lower() in {".h5", ".hdf5"} and "_composite" in name
+
+
 class FileRatingDelegate(QStyledItemDelegate):
     def paint(self, painter, option, index):
         rating = index.data(FILE_RATING_ROLE)

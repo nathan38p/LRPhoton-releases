@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QPushButton,
     QCheckBox,
     QSizePolicy,
@@ -34,7 +35,7 @@ from PySide6.QtWidgets import (
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
-from tabs.file_ratings import install_file_rating_menu, set_item_file_path
+from tabs.file_ratings import install_file_rating_menu, set_item_file_path, should_hide_file_in_browser
 from tabs.line_geometry import LineGeometrySelector, line_geometry_to_lrphoton
 from tabs.instrument_presets import (
     ID13_DEFAULT_CENTER_X,
@@ -50,6 +51,8 @@ from tabs.sandbox_polynomials import PolynomialProjectMixin
 from tabs.background_tab import BackgroundTab
 from tabs.sandbox_header_editor import HeaderEditorTab
 from tabs.tools_tab import ToolsTab
+from tabs.sandbox_format_converter import convert_image_to_format
+from tabs.sandbox_poni import apply_poni_to_files
 
 
 class SandboxTab(PolynomialProjectMixin, ImogoliteProjectMixin, Saxs3DProjectMixin, QWidget):
@@ -139,6 +142,14 @@ class SandboxTab(PolynomialProjectMixin, ImogoliteProjectMixin, Saxs3DProjectMix
         self.open_tools_project_button.clicked.connect(self.open_tools_project)
         selector_buttons.addWidget(self.open_tools_project_button, 1, 2)
 
+        self.open_converter_project_button = self.make_project_button("🔄 Convert format")
+        self.open_converter_project_button.clicked.connect(self.open_format_converter_project)
+        selector_buttons.addWidget(self.open_converter_project_button, 2, 0)
+
+        self.open_poni_project_button = self.make_project_button("📐 Poni apply")
+        self.open_poni_project_button.clicked.connect(self.open_poni_project)
+        selector_buttons.addWidget(self.open_poni_project_button, 2, 1)
+
         selector_layout.addLayout(selector_buttons)
         selector_layout.addStretch(1)
         self.project_stack.addWidget(selector_page)
@@ -146,6 +157,12 @@ class SandboxTab(PolynomialProjectMixin, ImogoliteProjectMixin, Saxs3DProjectMix
         splitter = QSplitter(Qt.Horizontal)
         self.sandbox_workbench_page = self.wrap_sandbox_project(splitter)
         self.project_stack.addWidget(self.sandbox_workbench_page)
+
+        self.format_converter_page = self.build_format_converter_page()
+        self.project_stack.addWidget(self.format_converter_page)
+
+        self.poni_page = self.build_poni_page()
+        self.project_stack.addWidget(self.poni_page)
 
         file_box = QGroupBox("File browser")
         self.file_box = file_box
@@ -563,6 +580,125 @@ class SandboxTab(PolynomialProjectMixin, ImogoliteProjectMixin, Saxs3DProjectMix
         """)
         return button
 
+    def build_format_converter_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        title = QLabel("Convert EDF/HDF5 image files")
+        title.setStyleSheet("font-size: 18px; font-weight: 600;")
+        layout.addWidget(title)
+
+        info = QLabel("Convert a source image to EDF or HDF5 while preserving the most useful metadata.")
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setSpacing(8)
+
+        self.format_converter_source_edit = QLineEdit()
+        self.format_converter_source_edit.setPlaceholderText("Select a source .edf or .h5 file")
+        source_row = QHBoxLayout()
+        source_row.addWidget(self.format_converter_source_edit, 1)
+        browse_source_button = QPushButton("Browse")
+        browse_source_button.clicked.connect(self.browse_format_converter_source)
+        source_row.addWidget(browse_source_button)
+        form.addRow("Source file", source_row)
+
+        self.format_converter_output_edit = QLineEdit()
+        self.format_converter_output_edit.setPlaceholderText("Output path")
+        output_row = QHBoxLayout()
+        output_row.addWidget(self.format_converter_output_edit, 1)
+        browse_output_button = QPushButton("Browse")
+        browse_output_button.clicked.connect(self.browse_format_converter_output)
+        output_row.addWidget(browse_output_button)
+        form.addRow("Output file", output_row)
+
+        self.format_converter_format_combo = QComboBox()
+        self.format_converter_format_combo.addItems([".edf", ".h5"])
+        form.addRow("Output format", self.format_converter_format_combo)
+
+        layout.addLayout(form)
+
+        button_row = QHBoxLayout()
+        button_row.addStretch(1)
+        convert_button = QPushButton("Convert")
+        convert_button.clicked.connect(self.convert_selected_format)
+        button_row.addWidget(convert_button)
+        layout.addLayout(button_row)
+
+        self.format_converter_status = QLabel("Choose a source file and an output path, then click Convert.")
+        self.format_converter_status.setWordWrap(True)
+        layout.addWidget(self.format_converter_status)
+        layout.addStretch(1)
+        return page
+
+    def build_poni_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        title = QLabel("Apply calibration from a .poni file")
+        title.setStyleSheet("font-size: 18px; font-weight: 600;")
+        layout.addWidget(title)
+
+        info = QLabel("Import geometry from a Poni file and write the matching center, distance, pixel size and wavelength into EDF/HDF5 headers.")
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setSpacing(8)
+
+        self.poni_source_edit = QLineEdit()
+        self.poni_source_edit.setPlaceholderText("Path to .poni file")
+        poni_row = QHBoxLayout()
+        poni_row.addWidget(self.poni_source_edit, 1)
+        browse_poni_button = QPushButton("Browse")
+        browse_poni_button.clicked.connect(self.browse_poni_source)
+        poni_row.addWidget(browse_poni_button)
+        form.addRow("Poni file", poni_row)
+
+        self.poni_targets_edit = QLineEdit()
+        self.poni_targets_edit.setPlaceholderText("Select one or more EDF/H5 files")
+        targets_row = QHBoxLayout()
+        targets_row.addWidget(self.poni_targets_edit, 1)
+        browse_targets_button = QPushButton("Browse")
+        browse_targets_button.clicked.connect(self.browse_poni_targets)
+        targets_row.addWidget(browse_targets_button)
+        form.addRow("Target files", targets_row)
+
+        self.poni_output_dir_edit = QLineEdit()
+        self.poni_output_dir_edit.setPlaceholderText("Optional output folder")
+        output_dir_row = QHBoxLayout()
+        output_dir_row.addWidget(self.poni_output_dir_edit, 1)
+        browse_output_dir_button = QPushButton("Browse")
+        browse_output_dir_button.clicked.connect(self.browse_poni_output_dir)
+        output_dir_row.addWidget(browse_output_dir_button)
+        form.addRow("Output folder", output_dir_row)
+
+        self.poni_output_format_combo = QComboBox()
+        self.poni_output_format_combo.addItems([".edf", ".h5"])
+        form.addRow("Output format", self.poni_output_format_combo)
+
+        layout.addLayout(form)
+
+        button_row = QHBoxLayout()
+        button_row.addStretch(1)
+        apply_button = QPushButton("Apply calibration")
+        apply_button.clicked.connect(self.apply_poni_calibration)
+        button_row.addWidget(apply_button)
+        layout.addLayout(button_row)
+
+        self.poni_status_label = QLabel("Select a .poni file and one or more target files, then click Apply calibration.")
+        self.poni_status_label.setWordWrap(True)
+        layout.addWidget(self.poni_status_label)
+        layout.addStretch(1)
+        return page
+
     def wrap_sandbox_project(self, content_widget):
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -613,6 +749,81 @@ class SandboxTab(PolynomialProjectMixin, ImogoliteProjectMixin, Saxs3DProjectMix
 
     def open_tools_project(self):
         self.project_stack.setCurrentWidget(self.tools_project_page)
+
+    def open_format_converter_project(self):
+        self.project_stack.setCurrentWidget(self.format_converter_page)
+
+    def open_poni_project(self):
+        self.project_stack.setCurrentWidget(self.poni_page)
+
+    def browse_format_converter_source(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Select source image", str(Path.home()), "Image files (*.edf *.h5 *.hdf5)")
+        if path:
+            self.format_converter_source_edit.setText(path)
+            if not self.format_converter_output_edit.text():
+                source = Path(path)
+                output_suffix = ".edf" if self.format_converter_format_combo.currentText() == ".edf" else ".h5"
+                self.format_converter_output_edit.setText(str(source.with_suffix(output_suffix)))
+
+    def browse_format_converter_output(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Select output path", str(Path.home()), "EDF files (*.edf);;HDF5 files (*.h5)")
+        if path:
+            self.format_converter_output_edit.setText(path)
+
+    def convert_selected_format(self):
+        source_path = self.format_converter_source_edit.text().strip()
+        output_path = self.format_converter_output_edit.text().strip()
+        output_format = self.format_converter_format_combo.currentText()
+
+        if not source_path:
+            self.format_converter_status.setText("Please select a source file first.")
+            return
+        if not output_path:
+            self.format_converter_status.setText("Please choose an output path.")
+            return
+
+        try:
+            result = convert_image_to_format(source_path, output_path, output_format)
+            self.format_converter_status.setText(f"Conversion completed: {result}")
+        except Exception as exc:
+            self.format_converter_status.setText(f"Conversion failed: {exc}")
+            QMessageBox.critical(self, "Conversion failed", str(exc))
+
+    def browse_poni_source(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Select Poni file", str(Path.home()), "Poni files (*.poni)")
+        if path:
+            self.poni_source_edit.setText(path)
+
+    def browse_poni_targets(self):
+        paths, _ = QFileDialog.getOpenFileNames(self, "Select target image files", str(Path.home()), "Image files (*.edf *.h5 *.hdf5)")
+        if paths:
+            self.poni_targets_edit.setText("; ".join(paths))
+
+    def browse_poni_output_dir(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select output folder", str(Path.home()))
+        if folder:
+            self.poni_output_dir_edit.setText(folder)
+
+    def apply_poni_calibration(self):
+        poni_path = self.poni_source_edit.text().strip()
+        target_text = self.poni_targets_edit.text().strip()
+        output_dir = self.poni_output_dir_edit.text().strip() or None
+        output_format = self.poni_output_format_combo.currentText()
+
+        if not poni_path:
+            self.poni_status_label.setText("Please select a .poni file.")
+            return
+        if not target_text:
+            self.poni_status_label.setText("Please select at least one target file.")
+            return
+
+        targets = [part.strip() for part in target_text.split(";") if part.strip()]
+        try:
+            results = apply_poni_to_files(poni_path, targets, output_dir=output_dir, output_format=output_format)
+            self.poni_status_label.setText(f"Applied calibration to {len(results)} file(s): " + ", ".join(str(path) for path in results))
+        except Exception as exc:
+            self.poni_status_label.setText(f"Application failed: {exc}")
+            QMessageBox.critical(self, "Calibration failed", str(exc))
 
     def apply_sandbox_project(self, name):
         is_imogolite = name == "Imogolite distance"
@@ -820,6 +1031,8 @@ class SandboxTab(PolynomialProjectMixin, ImogoliteProjectMixin, Saxs3DProjectMix
         files = []
         for path in iterator:
             if not path.is_file():
+                continue
+            if should_hide_file_in_browser(path):
                 continue
             lower_name = path.name.lower()
             if not any(fnmatch.fnmatch(lower_name, pattern.lower()) for pattern in extension_patterns):

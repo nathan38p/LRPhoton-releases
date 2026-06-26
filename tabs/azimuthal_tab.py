@@ -40,7 +40,7 @@ from .instrument_presets import (
     ID13_DEFAULT_PIXEL_MM,
     ID13_DEFAULT_WAVELENGTH_A,
 )
-from .file_ratings import file_path_from_item, install_file_rating_menu, is_file_rated_up, set_item_file_path
+from .file_ratings import file_path_from_item, install_file_rating_menu, is_file_rated_up, set_item_file_path, should_hide_file_in_browser
 from .line_geometry import LineGeometrySelector, line_geometry_to_lrphoton
 from .ui_style import (
     BLOCK_SPACING,
@@ -116,7 +116,7 @@ def read_edf_file(filename: str):
     with open(filename, "rb") as file:
         first = file.read(8192).decode("latin-1", errors="ignore")
 
-    match = re.search(r"EDF_HeaderSize\s*=\s*(\d+)", first)
+    match = re.search(r"EDF_HeaderSize\s*[:=]\s*(\d+)", first)
     if not match:
         raise ValueError("EDF_HeaderSize not found in EDF header.")
 
@@ -854,7 +854,6 @@ class AzimuthalTab(QWidget):
         self.total_frames = 1
 
         self.build_ui()
-        self.refresh_files()
         self.set_controls_enabled(False)
 
     def build_ui(self):
@@ -1377,7 +1376,11 @@ class AzimuthalTab(QWidget):
 
         from fnmatch import fnmatch
         files = sorted(set(files))
-        files = [file for file in files if fnmatch(file.name, name_filter)]
+        files = [
+            file for file in files
+            if not should_hide_file_in_browser(file)
+            and fnmatch(file.name, name_filter)
+        ]
 
         # In the Azimuthal tab, hide already-unfolded azimuthal images and
         # averaged H5 files from the browser. This tab should integrate detector

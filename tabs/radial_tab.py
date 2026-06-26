@@ -1,4 +1,5 @@
 import json
+import os
 import re
 from pathlib import Path
 
@@ -42,7 +43,7 @@ from .instrument_presets import (
     ID13_DEFAULT_PIXEL_MM,
     ID13_DEFAULT_WAVELENGTH_A,
 )
-from .file_ratings import file_path_from_item, install_file_rating_menu, is_file_rated_up, set_item_file_path
+from .file_ratings import file_path_from_item, install_file_rating_menu, is_file_rated_up, set_item_file_path, should_hide_file_in_browser
 from .line_geometry import LineGeometrySelector, line_geometry_to_lrphoton
 from .ui_style import (
     BLOCK_SPACING,
@@ -73,6 +74,9 @@ from .ui_style import (
 # ============================================================
 
 def parse_edf_header(header_text: str) -> dict:
+    if not isinstance(header_text, str):
+        header_text = str(header_text)
+
     i1 = header_text.find("{")
     i2 = header_text.rfind("}")
     if i1 < 0 or i2 < 0:
@@ -83,9 +87,20 @@ def parse_edf_header(header_text: str) -> dict:
 
     for part in content.split(";"):
         part = part.strip()
+        if not part:
+            continue
+
         if "=" in part:
             key, value = part.split("=", 1)
-            header[key.strip()] = value.strip()
+        elif ":" in part:
+            key, value = part.split(":", 1)
+        else:
+            continue
+
+        key = key.strip()
+        value = value.strip()
+        if key:
+            header[key] = value
 
     return header
 
@@ -119,7 +134,7 @@ def read_edf_file(filename: str):
     with open(filename, "rb") as file:
         first = file.read(8192).decode("latin-1", errors="ignore")
 
-    match = re.search(r"EDF_HeaderSize\s*=\s*(\d+)", first)
+    match = re.search(r"EDF_HeaderSize\s*[:=]\s*(\d+)", first)
     if not match:
         return read_edf_file_with_fabio(filename)
 
@@ -373,8 +388,28 @@ ID02_DEFAULT_CENTER_Y = 996.5
 ID02_DEFAULT_DISTANCE_M = 10.0002
 ID02_DEFAULT_PIXEL_MM = 0.075
 ID02_DEFAULT_WAVELENGTH_A = 1.01402
-CENTER_X_KEYS = ("Center_1", "center_1", "CenterX", "center_x", "BeamCenterX", "Beam_x", "beam_x")
-CENTER_Y_KEYS = ("Center_2", "center_2", "CenterY", "center_y", "BeamCenterY", "Beam_y", "beam_y")
+CENTER_X_KEYS = (
+    "Theoretical_Center_1",
+    "theoretical_center_1",
+    "Center_1",
+    "center_1",
+    "CenterX",
+    "center_x",
+    "BeamCenterX",
+    "Beam_x",
+    "beam_x",
+)
+CENTER_Y_KEYS = (
+    "Theoretical_Center_2",
+    "theoretical_center_2",
+    "Center_2",
+    "center_2",
+    "CenterY",
+    "center_y",
+    "BeamCenterY",
+    "Beam_y",
+    "beam_y",
+)
 ID13_PYFAI_CONFIG = {
     "application": "pyfai-integrate",
     "version": 5,
@@ -450,6 +485,13 @@ def wavelength_to_nm(value: float):
 
     return value
 
+
+def q_from_detector_geometry(radius_m, distance_m, wavelength_a):
+    """Return q in nm^-1 from detector radius and sample-detector distance."""
+    wavelength_nm = wavelength_to_nm(float(wavelength_a))
+    two_theta = np.arctan2(np.asarray(radius_m, dtype=np.float64), float(distance_m))
+    return (4.0 * np.pi / wavelength_nm) * np.sin(two_theta / 2.0)
+
 # ------------------------------------------------------------
 # q in nm⁻¹ to 2θ in degrees
 # ------------------------------------------------------------
@@ -477,26 +519,26 @@ def q_geometry_diagnostics(image, xc, yc, distance_m, pixel_x_mm, pixel_y_mm, wa
         [nx - 1, ny - 1],
     ], dtype=float)
 
-    dx_px = corners[:, 0] - xc
-    dy_px = corners[:, 1] - yc
+    dx_px = (corners[:, 0] + 1.0) - xc
+    dy_px = (corners[:, 1] + 1.0) - yc
     dx_m = dx_px * pixel_x_mm * 1e-3
     dy_m = dy_px * pixel_y_mm * 1e-3
     r_m = np.sqrt(dx_m ** 2 + dy_m ** 2)
     two_theta = np.arctan2(r_m, distance_m)
-    q_corners_angstrom = (4.0 * np.pi / wavelength_angstrom) * np.sin(two_theta / 2.0)
+    q_corners_angstrom = q_from_detector_geometry(r_m, distance_m, wavelength_angstrom)
     q_corners = q_corners_angstrom * 10.0
 
-    q_per_pixel_x = (
-        (4.0 * np.pi / wavelength_angstrom)
-        * np.sin(np.arctan2(pixel_x_mm * 1e-3, distance_m) / 2.0)
-        * 10.0
-    )
+    q_per_pixel_x = q_from_detector_geometry(
+        pixel_x_mm * 1e-3,
+        distance_m,
+        wavelength_angstrom,
+    ) * 10.0
 
-    q_per_pixel_y = (
-        (4.0 * np.pi / wavelength_angstrom)
-        * np.sin(np.arctan2(pixel_y_mm * 1e-3, distance_m) / 2.0)
-        * 10.0
-    )
+    q_per_pixel_y = q_from_detector_geometry(
+        pixel_y_mm * 1e-3,
+        distance_m,
+        wavelength_angstrom,
+    ) * 10.0
 
     return {
         "image_shape": f"{ny} x {nx}",
@@ -721,15 +763,17 @@ def radial_average(
     ny, nx = img.shape
     y, x = np.indices(img.shape)
 
-    dx_px = x - float(xc)
-    dy_px = y - float(yc)
+    # Match pyFAI's detector-coordinate convention more closely:
+    # the beam centre is expressed in pixel coordinates relative to the
+    # detector pixel grid, not shifted by +1 pixel.
+    dx_px = x.astype(np.float64) - float(xc)
+    dy_px = y.astype(np.float64) - float(yc)
 
     dx_m = dx_px * float(pixel_x_mm) * 1e-3
     dy_m = dy_px * float(pixel_y_mm) * 1e-3
     r_m = np.sqrt(dx_m ** 2 + dy_m ** 2)
     two_theta = np.arctan2(r_m, float(distance_m))
-    wavelength_nm = wavelength_to_nm(float(wavelength_a))
-    q = (4.0 * np.pi / wavelength_nm) * np.sin(two_theta / 2.0)
+    q = q_from_detector_geometry(r_m, float(distance_m), float(wavelength_a))
 
     psi = (np.degrees(np.arctan2(dy_px, dx_px)) + 360.0) % 360.0
     raw_sector_min = float(sector_min)
@@ -808,6 +852,7 @@ def pyfai_radial_average(
     sector_min=0,
     sector_max=360,
     min_pixels_per_bin=1,
+    poni_path=None,
 ):
     try:
         from pyFAI.integrator.azimuthal import AzimuthalIntegrator
@@ -816,35 +861,37 @@ def pyfai_radial_average(
 
     img = image.astype(np.float64)
     invalid_mask = ~np.isfinite(img) | (img <= 0) | (img >= 4e9)
-    if np.any(invalid_mask):
-        return radial_average(
-            image,
-            xc,
-            yc,
-            distance_m,
-            pixel_x_mm,
-            pixel_y_mm,
-            wavelength_a,
-            q_min,
-            q_max,
-            n_bins,
-            False,
-            sector_min,
-            sector_max,
-            min_pixels_per_bin,
-        )
     pixel1_m = float(pixel_y_mm) * 1e-3
     pixel2_m = float(pixel_x_mm) * 1e-3
     wavelength_m = wavelength_to_nm(float(wavelength_a)) * 1e-9
 
-    integrator = AzimuthalIntegrator(
-        dist=float(distance_m),
-        poni1=float(yc) * pixel1_m,
-        poni2=float(xc) * pixel2_m,
-        pixel1=pixel1_m,
-        pixel2=pixel2_m,
-        wavelength=wavelength_m,
-    )
+    integrator = None
+
+    if poni_path is not None:
+        try:
+            import pyFAI
+            poni_path = Path(poni_path).expanduser().resolve()
+            previous_cwd = Path.cwd()
+            try:
+                os.chdir(poni_path.parent)
+                integrator = pyFAI.load(str(poni_path))
+            finally:
+                os.chdir(previous_cwd)
+        except Exception as exc:
+            raise ValueError(f"Could not load PONI file {poni_path}: {exc}") from exc
+
+    if integrator is None:
+        # Keep the same convention as the local radial_average() above.
+        # This avoids the previous +1 pixel shift that mostly distorted the
+        # first low-q bump.
+        integrator = AzimuthalIntegrator(
+            dist=float(distance_m),
+            poni1=float(yc) * pixel1_m,
+            poni2=float(xc) * pixel2_m,
+            pixel1=pixel1_m,
+            pixel2=pixel2_m,
+            wavelength=wavelength_m,
+        )
 
     radial_range = None
     if q_min > 0 or q_max > 0:
@@ -875,31 +922,39 @@ def pyfai_radial_average(
         radial_range=radial_range,
         azimuth_range=azimuth_range,
         mask=invalid_mask,
-        method=("bbox", "csr", "cython"),
+        # Full pixel splitting is slower but matches pyFAI's reference behaviour
+        # better at low q, where a single detector pixel covers a large q interval.
+        method=("full", "histogram", "cython"),
         correctSolidAngle=True,
     )
 
     q_axis = np.asarray(getattr(result, "radial", result[0]), dtype=float)
     intensity = np.asarray(getattr(result, "intensity", result[1]), dtype=float)
+    result_counts = getattr(result, "count", None)
+    if result_counts is not None:
+        counts = np.asarray(result_counts, dtype=float)
+    elif poni_path is None:
+        _local_q, _local_i, counts, valid_mask = radial_average(
+            image,
+            xc,
+            yc,
+            distance_m,
+            pixel_x_mm,
+            pixel_y_mm,
+            wavelength_a,
+            q_min,
+            q_max,
+            n_bins,
+            False,
+            sector_min,
+            sector_max,
+            min_pixels_per_bin,
+        )
+    else:
+        counts = np.ones_like(q_axis, dtype=float)
 
-    _local_q, _local_i, counts, valid_mask = radial_average(
-        image,
-        xc,
-        yc,
-        distance_m,
-        pixel_x_mm,
-        pixel_y_mm,
-        wavelength_a,
-        q_min,
-        q_max,
-        n_bins,
-        False,
-        sector_min,
-        sector_max,
-        min_pixels_per_bin,
-    )
     if counts.size != q_axis.size:
-        counts = np.ones_like(q_axis, dtype=int)
+        counts = np.ones_like(q_axis, dtype=float)
 
     valid_bins = (
         np.isfinite(q_axis)
@@ -908,7 +963,10 @@ def pyfai_radial_average(
         & (intensity > 0)
         & (counts >= max(1, int(min_pixels_per_bin)))
     )
-    return q_axis[valid_bins], intensity[valid_bins], counts[valid_bins], valid_mask
+    if not np.any(valid_bins):
+        raise ValueError("pyFAI returned no valid I(q) bins after filtering.")
+
+    return q_axis[valid_bins], intensity[valid_bins], counts[valid_bins].astype(int), invalid_mask
 
 # ============================================================
 # =========================== CANVAS ==========================
@@ -1411,17 +1469,19 @@ class ImageCanvas(FigureCanvas):
             self.ax.imshow(overlay, origin="upper", interpolation="nearest")
 
         if xc is not None and yc is not None:
-            self.ax.axvline(xc, color="red", linewidth=1.0)
-            self.ax.axhline(yc, color="red", linewidth=1.0)
-            self.ax.plot(xc, yc, "wo", markersize=4)
+            center_x = float(xc) - 1.0
+            center_y = float(yc) - 1.0
+            self.ax.axvline(center_x, color="red", linewidth=1.0)
+            self.ax.axhline(center_y, color="red", linewidth=1.0)
+            self.ax.plot(center_x, center_y, "wo", markersize=4)
 
             ny, nx = image.shape
             radius = min(nx, ny) * 0.35
             angle_marks = [0, 90, 180, 270]
             for angle in angle_marks:
                 rad = np.deg2rad(angle)
-                x_text = xc + radius * np.cos(rad)
-                y_text = yc + radius * np.sin(rad)
+                x_text = center_x + radius * np.cos(rad)
+                y_text = center_y + radius * np.sin(rad)
                 self.ax.text(
                     x_text,
                     y_text,
@@ -1471,6 +1531,8 @@ class RadialTab(QWidget):
         self.last_results = {}
         self.last_result_paths = {}
         self.last_result_frame_counts = {}
+        self.last_result_frame_indices = {}
+        self.last_result_poni_paths = {}
         self.last_comparison_results = {}
         self.h5_dataset_name = None
         self.h5_frame_axis = None
@@ -1482,7 +1544,6 @@ class RadialTab(QWidget):
         self.q_axis_unit = "nm"
 
         self.build_ui()
-        self.refresh_files()
         self.set_controls_enabled(False)
 
     def update_image_intensity_limits(self):
@@ -1639,7 +1700,7 @@ class RadialTab(QWidget):
         filters_layout = QGridLayout()
 
         self.extensions_filter = QLineEdit("*.edf *.h5")
-        self.name_filter = QLineEdit("*cave*")
+        self.name_filter = QLineEdit("**")
 
         self.extensions_filter.textChanged.connect(self.refresh_files)
         self.name_filter.textChanged.connect(self.refresh_files)
@@ -1740,10 +1801,16 @@ class RadialTab(QWidget):
         self.n_bins.setValue(1000)
         self.n_bins.setMinimumWidth(130)
         self.n_bins.setFixedHeight(24)
-        self.integration_engine = QComboBox()
-        self.integration_engine.addItems(["pyFAI", "LRPhoton mean"])
-        self.integration_engine.setCurrentText("pyFAI")
-        self.integration_engine.setFixedWidth(130)
+        self.q_min_filter = QLineEdit()
+        self.q_min_filter.setPlaceholderText("none")
+        self.q_min_filter.setToolTip("Optional q min in nm⁻¹. Leave empty for no lower bound.")
+        self.q_min_filter.setFixedHeight(24)
+        self.q_min_filter.setMinimumWidth(130)
+        self.q_max_filter = QLineEdit()
+        self.q_max_filter.setPlaceholderText("none")
+        self.q_max_filter.setToolTip("Optional q max in nm⁻¹. Leave empty for no upper bound.")
+        self.q_max_filter.setFixedHeight(24)
+        self.q_max_filter.setMinimumWidth(130)
         self.normalization_mode = QComboBox()
         self.normalization_mode.addItem("Raw detector intensity", "raw")
         self.normalization_mode.addItem("Counts/s: I / ExposureTime", "exposure")
@@ -1801,6 +1868,10 @@ class RadialTab(QWidget):
         form.addWidget(self.sector_min, 1, 1)
         form.addWidget(QLabel("Sector max ψ (°):"), 2, 0)
         form.addWidget(self.sector_max, 2, 1)
+        form.addWidget(QLabel("q min (nm⁻¹):"), 3, 0)
+        form.addWidget(self.q_min_filter, 3, 1)
+        form.addWidget(QLabel("q max (nm⁻¹):"), 4, 0)
+        form.addWidget(self.q_max_filter, 4, 1)
 
         params_layout.addLayout(form)
 
@@ -1989,8 +2060,8 @@ class RadialTab(QWidget):
             self.wavelength, self.frame_spin, self.frame_start_spin, self.frame_end_spin,
             self.frame_slider, self.prev_frame_button, self.next_frame_button,
             self.use_sector,
-            self.sector_min, self.sector_max,
-            self.n_bins, self.integration_engine, self.normalization_mode, self.min_pixels_per_bin, self.intensity_scale, self.plot_mode, self.fit_button, self.show_legend, self.integrate_button,
+            self.sector_min, self.sector_max, self.q_min_filter, self.q_max_filter,
+            self.n_bins, self.normalization_mode, self.min_pixels_per_bin, self.intensity_scale, self.plot_mode, self.fit_button, self.show_legend, self.integrate_button,
             self.image_vmin_label, self.image_vmax_label,
             self.image_vmin_slider, self.image_vmax_slider, self.image_lock_contrast_checkbox, self.image_auto_contrast_button,
             self.integration_progress,
@@ -2140,6 +2211,13 @@ class RadialTab(QWidget):
         finally:
             self._changing_h5_frame = False
 
+    def poni_file_for_image(self, image_path):
+        selector = getattr(self, "line_geometry_selector", None)
+        if selector is None:
+            return None
+
+        return selector.selected_poni_path()
+
     def choose_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Choose folder", str(self.current_folder))
         if folder:
@@ -2183,7 +2261,11 @@ class RadialTab(QWidget):
 
         from fnmatch import fnmatch
         files = sorted(set(files))
-        files = [file for file in files if fnmatch(file.name, name_filter)]
+        files = [
+            file for file in files
+            if not should_hide_file_in_browser(file)
+            and fnmatch(file.name, name_filter)
+        ]
         if self.only_thumbs_up_checkbox.isChecked():
             files = [file for file in files if is_file_rated_up(file)]
 
@@ -2200,11 +2282,16 @@ class RadialTab(QWidget):
             self.last_results = {}
             self.last_result_paths = {}
             self.last_result_frame_counts = {}
+            self.last_result_frame_indices = {}
+            self.last_result_poni_paths = {}
             self.clear_graph_coordinates()
             clear_plot_canvas(self.canvas)
 
     def selection_changed(self):
         selected = self.selected_files()
+        if not selected and self.file_list.currentItem() is not None:
+            selected = [file_path_from_item(self.file_list.currentItem(), self.current_folder)]
+
         if not self.image_lock_contrast_checkbox.isChecked():
             self.image_canvas.reset_display_limits()
         self.set_controls_enabled(bool(selected))
@@ -2217,6 +2304,8 @@ class RadialTab(QWidget):
             self.last_results = {}
             self.last_result_paths = {}
             self.last_result_frame_counts = {}
+            self.last_result_frame_indices = {}
+            self.last_result_poni_paths = {}
             self.last_comparison_results = {}
             self.clear_graph_coordinates()
             clear_plot_canvas(self.canvas)
@@ -2236,14 +2325,16 @@ class RadialTab(QWidget):
                 self.configure_frame_navigation(1)
 
             self.update_frame_selector_visibility()
-            self.apply_preset_from_file(selected[0])
-            self.display_selected_file_preview(selected[0])
+            self.apply_preset_from_file(first_file)
+            self.display_selected_file_preview(first_file)
         else:
             self.configure_frame_navigation(1)
             self.update_frame_selector_visibility()
             self.last_results = {}
             self.last_result_paths = {}
             self.last_result_frame_counts = {}
+            self.last_result_frame_indices = {}
+            self.last_result_poni_paths = {}
             self.clear_graph_coordinates()
             self.image_canvas.raw_image = None
             self.image_canvas.set_q_map(None)
@@ -2343,12 +2434,6 @@ class RadialTab(QWidget):
         bins_spin.setValue(self.n_bins.value())
         bins_spin.setFixedWidth(150)
 
-        engine_combo = QComboBox()
-        for index in range(self.integration_engine.count()):
-            engine_combo.addItem(self.integration_engine.itemText(index))
-        engine_combo.setCurrentText(self.integration_engine.currentText())
-        engine_combo.setFixedWidth(150)
-
         normalize_combo = QComboBox()
         for index in range(self.normalization_mode.count()):
             normalize_combo.addItem(
@@ -2371,7 +2456,6 @@ class RadialTab(QWidget):
         scale_spin.setFixedWidth(150)
 
         settings_form.addRow("Bins", bins_spin)
-        settings_form.addRow("Engine", engine_combo)
         settings_form.addRow("Intensity correction", normalize_combo)
         settings_form.addRow("Min pixels/bin", min_pixels_spin)
         settings_form.addRow("I scale", scale_spin)
@@ -2393,7 +2477,6 @@ class RadialTab(QWidget):
         self.pixel_y.setValue(dialog_spins["pixel_y"].value())
         self.wavelength.setValue(dialog_spins["wavelength"].value())
         self.n_bins.setValue(bins_spin.value())
-        self.integration_engine.setCurrentText(engine_combo.currentText())
         self.normalization_mode.setCurrentIndex(normalize_combo.currentIndex())
         self.min_pixels_per_bin.setValue(min_pixels_spin.value())
         self.intensity_scale.setValue(scale_spin.value())
@@ -2463,21 +2546,26 @@ class RadialTab(QWidget):
 
     def display_selected_file_preview(self, file_path):
         try:
+            if file_path is None:
+                return
+            file_path = Path(file_path).expanduser()
+            if not file_path.exists():
+                raise FileNotFoundError(file_path)
+
             h5_dataset_name = self.h5_dataset_name if file_path.suffix.lower() in [".h5", ".hdf5"] else None
             h5_frame_index = self.frame_spin.value() - 1 if file_path.suffix.lower() in [".h5", ".hdf5"] else 0
             image, _ = read_image_file(file_path, h5_dataset_name, h5_frame_index)
 
-            ny, nx = image.shape
-            yy, xx = np.indices(image.shape)
+            if image.ndim != 2:
+                raise ValueError(f"Expected a 2D image, got shape {image.shape}")
 
-            dx_px = xx - float(self.center_x.value())
-            dy_px = yy - float(self.center_y.value())
+            yy, xx = np.indices(image.shape)
+            dx_px = (xx + 1.0) - float(self.center_x.value())
+            dy_px = (yy + 1.0) - float(self.center_y.value())
             dx_m = dx_px * float(self.pixel_x.value()) * 1e-3
             dy_m = dy_px * float(self.pixel_y.value()) * 1e-3
             r_m = np.sqrt(dx_m ** 2 + dy_m ** 2)
-            two_theta_map = np.arctan2(r_m, float(self.distance.value()))
-            wavelength_nm_map = wavelength_to_nm(float(self.wavelength.value()))
-            q_map = (4.0 * np.pi / wavelength_nm_map) * np.sin(two_theta_map / 2.0)
+            q_map = q_from_detector_geometry(r_m, float(self.distance.value()), float(self.wavelength.value()))
 
             self.image_canvas.set_q_map(q_map)
             self.image_canvas.show_image(image, self.center_x.value(), self.center_y.value(), mask=None)
@@ -2488,6 +2576,64 @@ class RadialTab(QWidget):
             self.image_canvas.set_q_map(None)
             self.image_coordinate_label.setText("ψ = - | q = - | I = -")
 
+    def radial_integration_tasks(self, files, all_h5_frames=False):
+        tasks = []
+        current_h5_frame = max(0, self.frame_spin.value() - 1)
+
+        for file_path in files:
+            suffix = file_path.suffix.lower()
+            if suffix in [".h5", ".hdf5"]:
+                dataset_name, _shape, _frame_axis, n_frames, _header = inspect_h5_image_dataset(file_path)
+                frame_count = max(1, int(n_frames))
+                if all_h5_frames and frame_count > 1:
+                    frame_indices = range(frame_count)
+                else:
+                    frame_indices = [max(0, min(current_h5_frame, frame_count - 1))]
+
+                for frame_index in frame_indices:
+                    frame_suffix = f"_frame{frame_index + 1:04d}" if frame_count > 1 else ""
+                    tasks.append({
+                        "path": file_path,
+                        "dataset_name": dataset_name,
+                        "frame_index": frame_index,
+                        "frame_count": frame_count,
+                        "is_h5": True,
+                        "result_key": f"{file_path.stem}{frame_suffix}",
+                        "plot_label": f"{file_path.stem} frame {frame_index + 1}" if frame_count > 1 else file_path.stem,
+                    })
+                continue
+
+            tasks.append({
+                "path": file_path,
+                "dataset_name": None,
+                "frame_index": 0,
+                "frame_count": 1,
+                "is_h5": False,
+                "result_key": file_path.stem,
+                "plot_label": file_path.stem,
+            })
+
+        return tasks
+
+    def q_range_filter_values(self):
+        def parse_optional_q(edit, label):
+            text = edit.text().strip()
+            if not text:
+                return 0.0
+            try:
+                value = float(normalize_decimal_text(text))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{label} must be a number in nm⁻¹, or empty.") from exc
+            if value < 0:
+                raise ValueError(f"{label} must be positive or empty.")
+            return value
+
+        q_min = parse_optional_q(self.q_min_filter, "q min")
+        q_max = parse_optional_q(self.q_max_filter, "q max")
+        if q_min > 0 and q_max > 0 and q_max <= q_min:
+            raise ValueError("q max must be greater than q min.")
+        return q_min, q_max
+
     def integrate_selected_files(self):
         if self._radial_integration_running:
             return
@@ -2497,6 +2643,8 @@ class RadialTab(QWidget):
             self.last_results = {}
             self.last_result_paths = {}
             self.last_result_frame_counts = {}
+            self.last_result_frame_indices = {}
+            self.last_result_poni_paths = {}
             self.clear_graph_coordinates()
             clear_plot_canvas(self.canvas)
             return
@@ -2513,30 +2661,39 @@ class RadialTab(QWidget):
         self.last_results = {}
         self.last_result_paths = {}
         self.last_result_frame_counts = {}
+        self.last_result_frame_indices = {}
+        self.last_result_poni_paths = {}
         self.last_comparison_results = {}
         ax.clear()
 
         messages = []
         user_requested_integrate = self.sender() is self.integrate_button
-        autosave_dat = len(files) > 1 and user_requested_integrate
+        integrate_all_h5_frames = user_requested_integrate
+        tasks = self.radial_integration_tasks(files, integrate_all_h5_frames)
+        autosave_dat = len(tasks) > 1 and user_requested_integrate
         saved_dat_paths = []
+        try:
+            q_min_filter, q_max_filter = self.q_range_filter_values()
+        except ValueError as error:
+            QMessageBox.warning(self, "q range", str(error))
+            return
 
         self._radial_integration_running = True
         self.integrate_button.setEnabled(False)
-        if user_requested_integrate and len(files) > 1:
+        if user_requested_integrate and len(tasks) > 1:
             self.integration_progress.setVisible(True)
-            self.integration_progress.setRange(0, len(files))
+            self.integration_progress.setRange(0, len(tasks))
             self.integration_progress.setValue(0)
-            self.integration_progress.setFormat(f"0 / {len(files)}")
+            self.integration_progress.setFormat(f"0 / {len(tasks)}")
             QCoreApplication.processEvents()
 
         try:
-            for index, file_path in enumerate(files, 1):
+            for index, task in enumerate(tasks, 1):
+                file_path = task["path"]
                 try:
-                    h5_frame_index = self.frame_spin.value() - 1 if file_path.suffix.lower() in [".h5", ".hdf5"] else 0
-                    image, header = read_image_file(file_path, None, h5_frame_index)
-                    q_min = 0
-                    q_max = 0
+                    image, header = read_image_file(file_path, task["dataset_name"], task["frame_index"])
+                    q_min = q_min_filter
+                    q_max = q_max_filter
                     sector_min = self.sector_min.value() if self.use_sector.isChecked() else 0
                     sector_max = self.sector_max.value() if self.use_sector.isChecked() else 360
                     use_log_bins = self.plot_mode.currentText() in ["log log", "log linear", "qI log", "qI log linear", "Kratky log", "Kratky log linear"]
@@ -2554,8 +2711,8 @@ class RadialTab(QWidget):
                     # --- q_map calculation ---
                     yy, xx = np.indices(image.shape)
 
-                    dx_px = xx - float(self.center_x.value())
-                    dy_px = yy - float(self.center_y.value())
+                    dx_px = (xx + 1.0) - float(self.center_x.value())
+                    dy_px = (yy + 1.0) - float(self.center_y.value())
 
                     dx_m = dx_px * float(self.pixel_x.value()) * 1e-3
                     dy_m = dy_px * float(self.pixel_y.value()) * 1e-3
@@ -2563,47 +2720,13 @@ class RadialTab(QWidget):
                     r_m = np.sqrt(dx_m ** 2 + dy_m ** 2)
                     two_theta_map = np.arctan2(r_m, float(self.distance.value()))
                     wavelength_nm_map = wavelength_to_nm(float(self.wavelength.value()))
-                    q_map = (4.0 * np.pi / wavelength_nm_map) * np.sin(two_theta_map / 2.0)
+                    q_map = q_from_detector_geometry(r_m, float(self.distance.value()), float(self.wavelength.value()))
                     # --- end q_map calculation ---
 
-                    engine = self.integration_engine.currentText()
-                    if engine == "pyFAI":
-                        try:
-                            q, intensity, counts, mask = pyfai_radial_average(
-                                image,
-                                self.center_x.value(),
-                                self.center_y.value(),
-                                self.distance.value(),
-                                self.pixel_x.value(),
-                                self.pixel_y.value(),
-                                self.wavelength.value(),
-                                q_min,
-                                q_max,
-                                self.n_bins.value(),
-                                sector_min,
-                                sector_max,
-                                self.min_pixels_per_bin.value(),
-                            )
-                        except Exception as pyfai_error:
-                            q, intensity, counts, mask = radial_average(
-                                image,
-                                self.center_x.value(),
-                                self.center_y.value(),
-                                self.distance.value(),
-                                self.pixel_x.value(),
-                                self.pixel_y.value(),
-                                self.wavelength.value(),
-                                q_min,
-                                q_max,
-                                self.n_bins.value(),
-                                use_log_bins,
-                                sector_min,
-                                sector_max,
-                                self.min_pixels_per_bin.value(),
-                            )
-                            engine = f"LRPhoton mean fallback, pyFAI error: {pyfai_error}"
-                    else:
-                        q, intensity, counts, mask = radial_average(
+                    try:
+                        matched_poni = self.poni_file_for_image(file_path)
+                        effective_engine = f"pyFAI + {matched_poni.name}" if matched_poni is not None else "pyFAI"
+                        q, intensity, counts, mask = pyfai_radial_average(
                             image,
                             self.center_x.value(),
                             self.center_y.value(),
@@ -2614,11 +2737,13 @@ class RadialTab(QWidget):
                             q_min,
                             q_max,
                             self.n_bins.value(),
-                            use_log_bins,
                             sector_min,
                             sector_max,
                             self.min_pixels_per_bin.value(),
+                            poni_path=matched_poni,
                         )
+                    except Exception as pyfai_error:
+                        raise RuntimeError(f"pyFAI integration failed: {pyfai_error}") from pyfai_error
 
                     normalization_factor, normalization_label = radial_normalization_factor(
                         header,
@@ -2627,14 +2752,26 @@ class RadialTab(QWidget):
                     intensity = intensity * normalization_factor
 
                     x, y = self.make_plot_arrays(q, intensity)
-                    line, = ax.plot(x, y, linewidth=1.2, label=file_path.stem)
-                    self.last_results[file_path.stem] = (q, intensity, counts)
-                    self.last_result_paths[file_path.stem] = file_path
-                    frame_count = int(header.get("Number of frames", 1) or 1)
-                    self.last_result_frame_counts[file_path.stem] = frame_count
+                    result_key = task["result_key"]
+                    line, = ax.plot(x, y, linewidth=1.2, label=task["plot_label"])
+                    self.last_results[result_key] = (q, intensity, counts)
+                    self.last_result_paths[result_key] = file_path
+                    frame_count = task["frame_count"]
+                    self.last_result_frame_counts[result_key] = frame_count
+                    self.last_result_frame_indices[result_key] = task["frame_index"] if task["is_h5"] else None
+                    self.last_result_poni_paths[result_key] = matched_poni
 
                     if autosave_dat:
-                        out_file = self.write_radial_result(file_path.stem, q, intensity, counts, file_path, frame_count)
+                        out_file = self.write_radial_result(
+                            file_path.stem,
+                            q,
+                            intensity,
+                            counts,
+                            file_path,
+                            frame_count,
+                            frame_index=task["frame_index"],
+                            poni_path=matched_poni,
+                        )
                         saved_dat_paths.append(out_file)
 
                     comparison_message = None
@@ -2672,11 +2809,15 @@ class RadialTab(QWidget):
                         except Exception as comparison_error:
                             comparison_message = f"  ID13 pyFAI comparison error: {comparison_error}"
 
-                    if file_path == files[0]:
+                    if index == 1:
                         self.image_canvas.set_q_map(q_map)
                         self.image_canvas.show_image(image, self.center_x.value(), self.center_y.value(), mask=mask)
                         self.sync_image_intensity_sliders()
-                    frame_text = f" | H5 frame {self.frame_spin.value()} / {self.h5_n_frames}" if file_path.suffix.lower() in [".h5", ".hdf5"] and self.h5_n_frames > 1 else ""
+                    frame_text = (
+                        f" | H5 frame {task['frame_index'] + 1} / {frame_count}"
+                        if task["is_h5"] and frame_count > 1
+                        else ""
+                    )
                     save_text = f"\n  saved: {out_file.name}" if autosave_dat else ""
                     messages.append(
                         f"Integrated: {file_path.name}{frame_text} ({q.size} bins){save_text}\n"
@@ -2685,7 +2826,7 @@ class RadialTab(QWidget):
                         f"  centre = {diagnostics['center']} ; image = {diagnostics['image_shape']} px\n"
                         f"  q per pixel ≈ {diagnostics['q_per_pixel_x']:.8g} nm⁻¹/px ; q corner max ≈ {diagnostics['q_corner_max']:.8g} nm⁻¹\n"
                         f"  exported q range = {np.nanmin(q):.10g} -> {np.nanmax(q):.10g} nm⁻¹"
-                        f" ; engine = {engine} ; normalization = {normalization_label}"
+                        f" ; engine = {effective_engine} ; normalization = {normalization_label}"
                         f" ; invalid pixels excluded ; min {self.min_pixels_per_bin.value()} pixels/bin ; no smoothing"
                     )
                     if comparison_message is not None:
@@ -2694,9 +2835,9 @@ class RadialTab(QWidget):
                 except Exception as error:
                     messages.append(f"Error: {file_path.name}: {error}")
 
-                if user_requested_integrate and len(files) > 1:
+                if user_requested_integrate and len(tasks) > 1:
                     self.integration_progress.setValue(index)
-                    self.integration_progress.setFormat(f"{index} / {len(files)}")
+                    self.integration_progress.setFormat(f"{index} / {len(tasks)}")
                     self.log_box.setPlainText("\n".join(messages))
                     QCoreApplication.processEvents()
         finally:
@@ -2726,7 +2867,7 @@ class RadialTab(QWidget):
 
         if autosave_dat:
             errors = [message for message in messages if message.startswith("Error:")]
-            summary = f"Radial integration finished: {len(saved_dat_paths)} / {len(files)} files saved."
+            summary = f"Radial integration finished: {len(saved_dat_paths)} / {len(tasks)} profiles saved."
             if errors:
                 QMessageBox.warning(
                     self,
@@ -2735,6 +2876,10 @@ class RadialTab(QWidget):
                 )
             else:
                 QMessageBox.information(self, "Radial integration", summary)
+        elif user_requested_integrate and not self.last_results:
+            errors = [message for message in messages if message.startswith("Error:")]
+            detail = "\n".join(errors[:3]) if errors else "No radial profile was produced."
+            QMessageBox.warning(self, "Radial integration", detail)
 
 
     def make_plot_x(self, q, wavelength_value=None):
@@ -3174,7 +3319,17 @@ class RadialTab(QWidget):
         return QInputDialog.getText(self, title, label, text=text)
 
     def radial_range_suffix(self):
-        range_parts = ["qfull"]
+        try:
+            q_min, q_max = self.q_range_filter_values()
+        except ValueError:
+            q_min, q_max = 0.0, 0.0
+
+        if q_min > 0 or q_max > 0:
+            q_min_text = f"{q_min:.3g}" if q_min > 0 else "min"
+            q_max_text = f"{q_max:.3g}" if q_max > 0 else "max"
+            range_parts = [f"q{q_min_text}-{q_max_text}nm-1"]
+        else:
+            range_parts = ["qfull"]
 
         if self.use_sector.isChecked():
             range_parts.append(f"psi{self.sector_min.value():.3g}-{self.sector_max.value():.3g}deg")
@@ -3183,22 +3338,29 @@ class RadialTab(QWidget):
 
         return "_" + "_".join(range_parts)
 
-    def radial_result_path(self, source_stem, source_path, frame_count):
+    def radial_result_path(self, source_stem, source_path, frame_count, frame_index=None):
         is_h5 = source_path is not None and source_path.suffix.lower() in [".h5", ".hdf5"]
-        frame_suffix = f"_frame{self.frame_spin.value():04d}" if is_h5 and frame_count > 1 else ""
+        if is_h5 and frame_count > 1:
+            frame_number = self.frame_spin.value() if frame_index is None else int(frame_index) + 1
+            frame_suffix = f"_frame{frame_number:04d}"
+        else:
+            frame_suffix = ""
         return self.current_folder / f"{source_stem}{frame_suffix}{self.radial_range_suffix()}_azimAvg.dat"
 
-    def write_radial_result(self, source_stem, q, intensity, counts, source_path=None, frame_count=1):
-        out_file = self.radial_result_path(source_stem, source_path, frame_count)
+    def write_radial_result(self, source_stem, q, intensity, counts, source_path=None, frame_count=1, frame_index=None, poni_path=None):
+        out_file = self.radial_result_path(source_stem, source_path, frame_count, frame_index=frame_index)
         scaled_intensity = intensity * self.intensity_scale.value()
         data = np.column_stack([q, scaled_intensity, counts])
+        poni_text = str(Path(poni_path).expanduser().resolve()) if poni_path is not None else "none"
         with open(out_file, "w", encoding="utf-8") as file:
             file.write("# q_nm-1 I_q pixel_count\n")
-            file.write(f"# integration_engine {self.integration_engine.currentText()}\n")
+            file.write("# integration_engine pyFAI\n")
+            file.write(f"# poni_file {poni_text}\n")
             file.write(f"# normalization {self.normalization_mode.currentText()}\n")
             file.write(f"# intensity_scale {self.intensity_scale.value():.8g}\n")
             file.write("# invalid_pixel_handling excluded\n")
             file.write(f"# min_pixels_per_bin {self.min_pixels_per_bin.value()}\n")
+            file.write("# solid_angle_correction true\n")
             file.write("# smoothing none\n")
             np.savetxt(file, data, fmt="%.8e %.8e %d")
         return out_file
@@ -3211,6 +3373,18 @@ class RadialTab(QWidget):
         for source_stem, (q, intensity, counts) in self.last_results.items():
             source_path = self.last_result_paths.get(source_stem)
             frame_count = self.last_result_frame_counts.get(source_stem, 1)
-            self.write_radial_result(source_stem, q, intensity, counts, source_path, frame_count)
+            frame_index = self.last_result_frame_indices.get(source_stem)
+            poni_path = self.last_result_poni_paths.get(source_stem)
+            output_stem = source_path.stem if source_path is not None else source_stem
+            self.write_radial_result(
+                output_stem,
+                q,
+                intensity,
+                counts,
+                source_path,
+                frame_count,
+                frame_index=frame_index,
+                poni_path=poni_path,
+            )
 
         QMessageBox.information(self, "Saved", "Radial profiles saved in the current folder.")

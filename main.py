@@ -421,8 +421,9 @@ class MainWindow(QMainWindow):
         self.tab_bar.setTabText(self.capture_sals_tab_index, "📷 Capture")
         self.tab_bar.setTabEnabled(self.capture_sals_tab_index, True)
         self.tab_bar.setTabText(self.sandbox_tab_index, "🧪 Sandbox")
-        self.tab_bar.setTabVisible(self.sandbox_tab_index, True)
-        self.tab_bar.setTabEnabled(self.sandbox_tab_index, True)
+        sandbox_available = self.is_development_copy()
+        self.tab_bar.setTabVisible(self.sandbox_tab_index, sandbox_available)
+        self.tab_bar.setTabEnabled(self.sandbox_tab_index, sandbox_available)
         self.tab_bar.setTabVisible(self.unfold_tab_index, False)
 
         header_layout.addStretch()
@@ -659,17 +660,18 @@ class MainWindow(QMainWindow):
             self.sandbox_tab,
         ]
 
-        default_folder = str(self.load_last_folder())
-        for tab in self.folder_synced_tabs:
-            if hasattr(tab, "set_folder_from_external_tab"):
-                tab.set_folder_from_external_tab(default_folder)
+        self.current_synced_folder = str(self.load_last_folder())
+        self.folder_initialized_tabs = set()
+        self.initialize_tab_folder(self.tab_bar.currentIndex())
 
         for source_tab in self.folder_synced_tabs:
             source_tab.folder_changed.connect(self.save_last_folder)
             for target_tab in self.folder_synced_tabs:
                 if source_tab is target_tab:
                     continue
-                source_tab.folder_changed.connect(target_tab.set_folder_from_external_tab)
+                source_tab.folder_changed.connect(
+                    lambda folder, tab=target_tab: self.sync_folder_to_tab(tab, folder)
+                )
 
         for index in range(self.pages.count()):
             page = self.pages.widget(index)
@@ -677,10 +679,33 @@ class MainWindow(QMainWindow):
                 page.setMinimumWidth(0)
                 page.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
 
-        self.tab_bar.currentChanged.connect(self.pages.setCurrentIndex)
-        self.tab_bar.currentChanged.connect(lambda _index: self.sync_pages_width_to_window())
+        self.tab_bar.currentChanged.connect(self.on_tab_changed)
         self.pages.setCurrentIndex(self.tab_bar.currentIndex())
         self.sync_pages_width_to_window()
+
+    def initialize_tab_folder(self, index):
+        if index < 0 or index >= self.pages.count():
+            return
+
+        tab = self.pages.widget(index)
+        if tab is None or tab in self.folder_initialized_tabs:
+            return
+
+        self.folder_initialized_tabs.add(tab)
+        if hasattr(tab, "set_folder_from_external_tab"):
+            tab.set_folder_from_external_tab(self.current_synced_folder)
+
+    def on_tab_changed(self, index):
+        self.initialize_tab_folder(index)
+        self.pages.setCurrentIndex(index)
+        self.sync_pages_width_to_window()
+
+    def sync_folder_to_tab(self, tab, folder):
+        self.current_synced_folder = str(folder)
+        if tab not in getattr(self, "folder_initialized_tabs", set()):
+            return
+        if hasattr(tab, "set_folder_from_external_tab"):
+            tab.set_folder_from_external_tab(folder)
 
     def load_last_folder(self):
         try:
@@ -697,6 +722,8 @@ class MainWindow(QMainWindow):
         folder = Path(folder).expanduser()
         if not folder.exists() or not folder.is_dir():
             return
+
+        self.current_synced_folder = str(folder)
 
         try:
             USER_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
