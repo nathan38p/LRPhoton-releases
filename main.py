@@ -387,7 +387,7 @@ class MainWindow(QMainWindow):
         header_layout.addLayout(title_box)
 
         self.header_balance_spacer = QWidget()
-        self.header_balance_spacer.setFixedWidth(120)
+        self.header_balance_spacer.setFixedWidth(0)
 
         # ============================================================
         # TAB BAR IN HEADER
@@ -430,8 +430,7 @@ class MainWindow(QMainWindow):
         self.tab_bar.setTabVisible(self.unfold_tab_index, False)
 
         header_layout.addStretch()
-        header_layout.addWidget(self.tab_bar)
-        header_layout.addWidget(self.header_balance_spacer)
+        header_layout.addWidget(self.tab_bar, 0, Qt.AlignRight)
 
         self.version_label = QPushButton()
         self.version_label.setFixedHeight(28)
@@ -571,6 +570,9 @@ class MainWindow(QMainWindow):
             current_page.setFixedWidth(available_width)
             if available_height > 0:
                 current_page.setFixedHeight(available_height)
+
+        if hasattr(self, "tab_bar"):
+            self.tab_bar.updateGeometry()
 
     def resize_to_available_screen(self):
         screen = QApplication.primaryScreen()
