@@ -29,6 +29,7 @@ from tabs.instrument_presets import (
 
 
 GEOMETRY_FILE = Path.home() / ".lrphoton" / "line_geometries.json"
+LAST_GEOMETRY_KEY = "last_geometry"
 SELECT_GEOMETRY_ITEM = "Beamline"
 ADD_GEOMETRY_ITEM = "+ Ajouter une ligne..."
 LRP_SALS_DEFAULT_NAME = "LRP SALS default"
@@ -130,9 +131,44 @@ def load_line_geometries():
         return defaults
 
 
+def load_last_line_geometry_name():
+    try:
+        data = json.loads(GEOMETRY_FILE.read_text(encoding="utf-8"))
+        name = str(data.get(LAST_GEOMETRY_KEY, "")).strip()
+        if name == LEGACY_SALS_DEFAULT_NAME:
+            return LRP_SALS_DEFAULT_NAME
+        return name or None
+    except Exception:
+        return None
+
+
+def save_last_line_geometry_name(name):
+    name = str(name or "").strip()
+    if not name or name in {SELECT_GEOMETRY_ITEM, ADD_GEOMETRY_ITEM}:
+        return
+    if name == LEGACY_SALS_DEFAULT_NAME:
+        name = LRP_SALS_DEFAULT_NAME
+
+    GEOMETRY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        data = json.loads(GEOMETRY_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            data = {}
+    except Exception:
+        data = {}
+    data[LAST_GEOMETRY_KEY] = name
+    if "geometries" not in data:
+        geometries = load_line_geometries()
+        data["geometries"] = [geometries[key] for key in sorted(geometries)]
+    GEOMETRY_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
 def save_line_geometries(geometries):
     GEOMETRY_FILE.parent.mkdir(parents=True, exist_ok=True)
     payload = {"geometries": [geometries[name] for name in sorted(geometries)]}
+    last_geometry = load_last_line_geometry_name()
+    if last_geometry:
+        payload[LAST_GEOMETRY_KEY] = last_geometry
     GEOMETRY_FILE.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
@@ -425,8 +461,11 @@ class LineGeometrySelector(QWidget):
         self.geometries = load_line_geometries()
         if current_name == LEGACY_SALS_DEFAULT_NAME:
             current_name = LRP_SALS_DEFAULT_NAME
+        last_name = load_last_line_geometry_name()
+        if last_name in self.geometries:
+            current_name = last_name
         self.current_name = current_name if current_name in self.geometries else next(iter(self.geometries))
-        self.has_explicit_selection = False
+        self.has_explicit_selection = self.current_name == last_name
         self.context_geometry_provider = None
 
         layout = QVBoxLayout(self)
@@ -543,11 +582,15 @@ class LineGeometrySelector(QWidget):
             return
         self.geometry_selected.emit(self.current_name, geometry)
 
-    def set_current_name(self, name, explicit=False):
+    def set_current_name(self, name, explicit=False, emit_selection=False, persist=False):
         if name in self.geometries:
             self.current_name = name
             self.has_explicit_selection = bool(explicit)
             self.refresh()
+            if persist:
+                save_last_line_geometry_name(name)
+            if emit_selection:
+                self.geometry_selected.emit(name, self.geometry_for_name(name))
 
     def on_combo_changed(self, name):
         if not name:
@@ -559,6 +602,7 @@ class LineGeometrySelector(QWidget):
             return
         self.current_name = name
         self.has_explicit_selection = True
+        save_last_line_geometry_name(name)
         self.geometry_selected.emit(name, self.geometry_for_name(name))
 
     def open_editor(self, new_geometry=False):
@@ -602,6 +646,7 @@ class LineGeometrySelector(QWidget):
         self.current_name = geometry["name"]
         self.has_explicit_selection = True
         save_line_geometries(self.geometries)
+        save_last_line_geometry_name(self.current_name)
         self.refresh()
         self.geometry_selected.emit(self.current_name, geometry)
 

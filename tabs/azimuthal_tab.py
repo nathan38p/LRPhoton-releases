@@ -4,7 +4,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import Qt, Signal, QTimer, QEvent
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -1047,6 +1047,10 @@ class ImageCanvas(FigureCanvas):
         self.fig = Figure()
         self.ax = self.fig.add_subplot(111)
         super().__init__(self.fig)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setStyleSheet("background: transparent;")
+        self.fig.patch.set_alpha(0)
+        self.ax.set_facecolor("none")
         self.ax.set_axis_off()
         self.ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
         self.fig.subplots_adjust(left=0.01, right=0.99, top=0.99, bottom=0.01)
@@ -1056,6 +1060,9 @@ class ImageCanvas(FigureCanvas):
         self._xlim_start = None
         self._ylim_start = None
         self._base_scale = 1.18
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setMouseTracking(True)
+        self.grabGesture(Qt.PinchGesture)
         self.raw_image = None
         self.coordinate_label = None
         self.display_vmin = None
@@ -1073,6 +1080,132 @@ class ImageCanvas(FigureCanvas):
         self.mpl_connect("button_press_event", self._on_press)
         self.mpl_connect("button_release_event", self._on_release)
         self.mpl_connect("motion_notify_event", self._on_motion)
+
+    def event(self, event):
+        if event.type() == QEvent.Gesture:
+            return self._handle_gesture_event(event)
+
+        if event.type() == QEvent.NativeGesture:
+            return self._handle_native_gesture_event(event)
+
+        return super().event(event)
+
+    def wheelEvent(self, event):
+        pixel_delta = event.pixelDelta()
+        angle_delta = event.angleDelta()
+        modifiers = event.modifiers()
+
+        is_zoom = bool(modifiers & Qt.ControlModifier) or bool(modifiers & Qt.MetaModifier)
+
+        if is_zoom:
+            delta_y = pixel_delta.y() if not pixel_delta.isNull() else angle_delta.y() / 8.0
+
+            if delta_y > 0:
+                scale_factor = 1 / self._base_scale
+            elif delta_y < 0:
+                scale_factor = self._base_scale
+            else:
+                return
+
+            canvas_pos = event.position()
+            self._zoom_at_canvas_position(canvas_pos.x(), canvas_pos.y(), scale_factor)
+            event.accept()
+            return
+
+        dx = pixel_delta.x() if not pixel_delta.isNull() else angle_delta.x() / 8.0
+        dy = pixel_delta.y() if not pixel_delta.isNull() else angle_delta.y() / 8.0
+        self._pan_from_pixels(dx, dy)
+        event.accept()
+
+    def _handle_gesture_event(self, event):
+        pinch = event.gesture(Qt.PinchGesture)
+        if pinch is None:
+            return False
+
+        scale = pinch.scaleFactor()
+        if scale and scale > 0:
+            center = pinch.centerPoint()
+            self._zoom_at_canvas_position(center.x(), center.y(), 1.0 / scale)
+
+        event.accept()
+        return True
+
+    def _handle_native_gesture_event(self, event):
+        gesture_type = event.gestureType()
+
+        if gesture_type == Qt.ZoomNativeGesture:
+            value = event.value()
+            if value != 0:
+                scale = 1.0 / (1.0 + value)
+                position = event.position()
+                self._zoom_at_canvas_position(position.x(), position.y(), scale)
+            event.accept()
+            return True
+
+        if gesture_type == Qt.PanNativeGesture:
+            value = event.value()
+            self._pan_from_pixels(0, value * 120.0)
+            event.accept()
+            return True
+
+        return False
+
+    def _zoom_at_canvas_position(self, canvas_x, canvas_y, scale_factor):
+        if scale_factor <= 0 or self.raw_image is None:
+            return
+
+        height = self.height()
+        display_y = height - canvas_y
+
+        try:
+            xdata, ydata = self.ax.transData.inverted().transform((canvas_x, display_y))
+        except Exception:
+            return
+
+        if not np.isfinite(xdata) or not np.isfinite(ydata):
+            return
+
+        cur_xlim = self.ax.get_xlim()
+        cur_ylim = self.ax.get_ylim()
+
+        new_width = (cur_xlim[1] - cur_xlim[0]) * scale_factor
+        new_height = (cur_ylim[1] - cur_ylim[0]) * scale_factor
+
+        relx = (cur_xlim[1] - xdata) / (cur_xlim[1] - cur_xlim[0])
+        rely = (cur_ylim[1] - ydata) / (cur_ylim[1] - cur_ylim[0])
+
+        self.ax.set_xlim([
+            xdata - new_width * (1 - relx),
+            xdata + new_width * relx,
+        ])
+
+        self.ax.set_ylim([
+            ydata - new_height * (1 - rely),
+            ydata + new_height * rely,
+        ])
+        constrain_image_axes(self.ax, self.raw_image.shape)
+
+        self.draw_idle()
+
+    def _pan_from_pixels(self, dx_pixels, dy_pixels):
+        if self.raw_image is None or (dx_pixels == 0 and dy_pixels == 0):
+            return
+
+        bbox = self.ax.bbox
+        width = max(float(bbox.width), 1.0)
+        height = max(float(bbox.height), 1.0)
+
+        cur_xlim = self.ax.get_xlim()
+        cur_ylim = self.ax.get_ylim()
+
+        dx_data = (cur_xlim[1] - cur_xlim[0]) * dx_pixels / width
+        dy_data = (cur_ylim[1] - cur_ylim[0]) * dy_pixels / height
+
+        self.ax.set_xlim(cur_xlim[0] - dx_data, cur_xlim[1] - dx_data)
+        self.ax.set_ylim(cur_ylim[0] + dy_data, cur_ylim[1] + dy_data)
+        constrain_image_axes(self.ax, self.raw_image.shape)
+
+        self.draw_idle()
 
     def set_coordinate_label(self, label):
         self.coordinate_label = label
@@ -1214,6 +1347,8 @@ class ImageCanvas(FigureCanvas):
         self.last_mask = mask
 
         self.ax.clear()
+        self.fig.patch.set_alpha(0)
+        self.ax.set_facecolor("none")
         self.ax.set_axis_off()
         self.ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
 

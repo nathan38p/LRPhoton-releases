@@ -734,20 +734,21 @@ class MainWindow(QMainWindow):
         self.on_tab_changed(index)
 
     def open_header_editor(self):
-        if not hasattr(self, "pages") or not hasattr(self, "sandbox_tab"):
+        if not hasattr(self, "pages") or not hasattr(self, "header_editor_tab"):
             return
 
-        index = self.pages.indexOf(self.sandbox_tab)
+        index = self.pages.indexOf(self.header_editor_tab)
         if index < 0:
             return
 
-        self.initialize_tab_folder(index)
-        self.pages.setCurrentIndex(index)
+        if self.header_editor_tab not in getattr(self, "folder_initialized_tabs", set()):
+            self.folder_initialized_tabs.add(self.header_editor_tab)
+            self.header_editor_tab.set_folder_from_external_tab(self.current_synced_folder)
+
+        self.pages.setCurrentWidget(self.header_editor_tab)
         self.tab_bar.blockSignals(True)
         self.tab_bar.setCurrentIndex(-1)
         self.tab_bar.blockSignals(False)
-        if hasattr(self.sandbox_tab, "open_header_editor_project"):
-            self.sandbox_tab.open_header_editor_project()
         self.sync_pages_width_to_window()
 
     def resizeEvent(self, event):
@@ -853,6 +854,7 @@ class MainWindow(QMainWindow):
         from tabs.unfold_tab import UnfoldTab
         from tabs.hermans_tab import HermansTab
         from tabs.distances_tab import DistancesTab
+        from tabs.sandbox_header_editor import HeaderEditorTab
         from tabs.datplot_tab import DatPlotTab
         from tabs.tools_tab import ToolsTab
         from tabs.sandbox_tab import SandboxTab
@@ -875,11 +877,16 @@ class MainWindow(QMainWindow):
         self.hermans_tab = HermansTab()
         self.distances_tab = DistancesTab()
         self.sandbox_tab = SandboxTab()
+        self.header_editor_tab = HeaderEditorTab()
         development_copy = self.is_development_copy()
         self.radial_tab.radial_test_button.setVisible(development_copy)
         self.radial_tab.radial_test_button.setEnabled(development_copy)
+        self.radial_tab.fit_button.setVisible(development_copy)
+        self.radial_tab.fit_button.setEnabled(development_copy)
         self.azimuthal_tab.azimuthal_test_button.setVisible(development_copy)
         self.azimuthal_tab.azimuthal_test_button.setEnabled(development_copy)
+        self.datplot_tab.fit_button.setVisible(development_copy)
+        self.datplot_tab.fit_button.setEnabled(development_copy)
         self.view_tab.set_q_geometry_source_tab(self.azimuthal_tab)
         self.unfold_tab.set_q_geometry_source_tab(self.azimuthal_tab)
 
@@ -902,6 +909,7 @@ class MainWindow(QMainWindow):
         self.pages.addWidget(self.hermans_tab)
         self.pages.addWidget(self.distances_tab)
         self.pages.addWidget(self.sandbox_tab)
+        self.pages.addWidget(self.header_editor_tab)
 
         # Folder synchronisation between tabs using a folder browser.
         # When one tab changes folder, all the others are updated too.
@@ -917,6 +925,7 @@ class MainWindow(QMainWindow):
             self.azimuthal_tab,
             self.unfold_tab,
             self.hermans_tab,
+            self.header_editor_tab,
             self.sandbox_tab,
         ]
 
@@ -941,6 +950,7 @@ class MainWindow(QMainWindow):
 
         self.tab_bar.currentChanged.connect(self.on_tab_changed)
         self.pages.setCurrentIndex(self.tab_bar.currentIndex())
+        self.apply_last_line_geometry_to_tab(self.pages.currentWidget())
         self.sync_pages_width_to_window()
 
     def initialize_tab_folder(self, index):
@@ -958,7 +968,21 @@ class MainWindow(QMainWindow):
     def on_tab_changed(self, index):
         self.initialize_tab_folder(index)
         self.pages.setCurrentIndex(index)
+        self.apply_last_line_geometry_to_tab(self.pages.widget(index))
         self.sync_pages_width_to_window()
+
+    def apply_last_line_geometry_to_tab(self, tab):
+        selector = getattr(tab, "line_geometry_selector", None)
+        if selector is None:
+            return
+        try:
+            from tabs.line_geometry import load_last_line_geometry_name
+
+            name = load_last_line_geometry_name()
+            if name and name in selector.geometries:
+                selector.set_current_name(name, explicit=True, emit_selection=True)
+        except Exception:
+            return
 
     def sync_folder_to_tab(self, tab, folder):
         self.current_synced_folder = str(folder)

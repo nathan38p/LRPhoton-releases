@@ -83,6 +83,7 @@ PLOT_TRANSFORMED_MODES = {
 PLOT_LOG_X_MODES = {"log linear", "log log", "Kratky (q²I(q))", "q⁴I(q)", "q⁴I(q⁴)"}
 PLOT_LOG_Y_MODES = {"linear log", "log log", "Kratky (q²I(q))", "q⁴I(q)", "q⁴I(q⁴)"}
 PLOT_LOG_LOG_MODES = PLOT_LOG_X_MODES & PLOT_LOG_Y_MODES
+Q_AXIS_LABELS = {"q / nm⁻¹", "q / Å⁻¹", "q / A⁻¹", "q / nm^-1", "q / A^-1"}
 
 
 # ============================================================
@@ -2427,7 +2428,7 @@ class DatPlotTab(QWidget):
             if event.inaxes != fit_ax or event.xdata is None or event.ydata is None:
                 coordinate_label.setText("q = - | I = -")
                 return
-            unit_label = "Å⁻¹" if self.q_axis_unit == "A" else "nm⁻¹"
+            unit_label = "A⁻¹" if self.q_axis_unit == "A" else "nm⁻¹"
             coordinate_label.setText(f"q = {event.xdata:.6g} {unit_label} | I = {event.ydata:.6g}")
 
         def clear_fit_coordinates(event=None):
@@ -3097,7 +3098,7 @@ class DatPlotTab(QWidget):
                 clicked_label = False
             if clicked_label and self.curves and not self.curves_are_really_0_to_360():
                 self.q_axis_unit = "A" if self.q_axis_unit == "nm" else "nm"
-                if self.x_label.text() in ("", "q / nm⁻¹", "q / Å⁻¹"):
+                if self.x_label.text() == "" or self.is_q_axis_label(self.x_label.text()):
                     self.x_label.blockSignals(True)
                     self.x_label.setText(self.q_axis_label())
                     self.x_label.blockSignals(False)
@@ -3244,7 +3245,10 @@ class DatPlotTab(QWidget):
         return np.asarray(x, dtype=float) * self.q_display_factor()
 
     def q_axis_label(self):
-        return "q / Å⁻¹" if self.q_axis_unit == "A" else "q / nm⁻¹"
+        return "q / A⁻¹" if self.q_axis_unit == "A" else "q / nm⁻¹"
+
+    def is_q_axis_label(self, label):
+        return str(label or "").strip() in Q_AXIS_LABELS
 
     def graph_coordinate_labels(self):
         if self.curves_are_really_0_to_360():
@@ -3277,7 +3281,7 @@ class DatPlotTab(QWidget):
             if x_name == "ψ":
                 x_suffix = "°"
             else:
-                x_suffix = " Å⁻¹" if self.q_axis_unit == "A" else " nm⁻¹"
+                x_suffix = " A⁻¹" if self.q_axis_unit == "A" else " nm⁻¹"
             self.graph_coordinate_label.setText(
                 f"{x_name} = {event.xdata:.6g}{x_suffix} | {y_name} = {event.ydata:.6g}"
             )
@@ -3478,12 +3482,16 @@ class DatPlotTab(QWidget):
             default_x_label = (
                 transform["x_label"]
                 if transform is not None and transform["x_power"] != 1
-                else (curve_x_labels[0] if curve_x_labels else self.q_axis_label())
+                else (
+                    self.q_axis_label()
+                    if curve_x_labels and self.is_q_axis_label(curve_x_labels[0])
+                    else (curve_x_labels[0] if curve_x_labels else self.q_axis_label())
+                )
             )
             ax.set_xlabel(self.x_label.text() or default_x_label)
             if transform is not None and transform["x_power"] != 1 and self.x_label.text() in ("", self.q_axis_label()):
                 ax.set_xlabel(default_x_label)
-            elif curve_x_labels and (not self.x_label.text() or self.x_label.text() == self.q_axis_label()):
+            elif curve_x_labels and (not self.x_label.text() or self.is_q_axis_label(self.x_label.text())):
                 ax.set_xlabel(default_x_label)
         axis_curve_labels = {}
         for axis_name in PLOT_Y_AXES:

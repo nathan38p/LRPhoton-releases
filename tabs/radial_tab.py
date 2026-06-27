@@ -1635,6 +1635,10 @@ class ImageCanvas(FigureCanvas):
         self.fig = Figure()
         self.ax = self.fig.add_subplot(111)
         super().__init__(self.fig)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setStyleSheet("background: transparent;")
+        self.fig.patch.set_alpha(0)
+        self.ax.set_facecolor("none")
         self.ax.set_axis_off()
         self.ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
         self.fig.subplots_adjust(left=0.01, right=0.99, top=0.99, bottom=0.01)
@@ -1734,7 +1738,7 @@ class ImageCanvas(FigureCanvas):
         return False
 
     def _zoom_at_canvas_position(self, canvas_x, canvas_y, scale_factor):
-        if scale_factor <= 0:
+        if scale_factor <= 0 or self.raw_image is None:
             return
 
         height = self.height()
@@ -1771,7 +1775,7 @@ class ImageCanvas(FigureCanvas):
         self.draw_idle()
 
     def _pan_from_pixels(self, dx_pixels, dy_pixels):
-        if dx_pixels == 0 and dy_pixels == 0:
+        if self.raw_image is None or (dx_pixels == 0 and dy_pixels == 0):
             return
 
         bbox = self.ax.bbox
@@ -1907,6 +1911,8 @@ class ImageCanvas(FigureCanvas):
         self.last_mask = mask
 
         self.ax.clear()
+        self.fig.patch.set_alpha(0)
+        self.ax.set_facecolor("none")
         self.ax.set_axis_off()
         self.ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
 
