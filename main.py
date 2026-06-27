@@ -29,7 +29,7 @@ LOCAL_PYTHON_WHEELS = [
     ("vmbpy", "vmbpy-1.0.4-py3-none-any.whl"),
 ]
 
-#test update
+#test update2
 
 def bundled_file_path(*parts):
     bases = []
