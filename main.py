@@ -510,6 +510,13 @@ class MainWindow(QMainWindow):
         find_center_action.triggered.connect(self.open_center_tab)
         tools_menu.addAction(find_center_action)
 
+        self.feedback_menu_action = QAction("💬", self)
+        self.feedback_menu_action.setToolTip("Feedback")
+        self.feedback_menu_action.setStatusTip("Feedback")
+        self.feedback_menu_action.triggered.connect(self.open_issue_report_dialog)
+        self.feedback_menu_action.setVisible(not self.is_development_copy())
+        self.menuBar().addAction(self.feedback_menu_action)
+
     def open_center_tab(self):
         if not hasattr(self, "pages") or not hasattr(self, "centre_tab"):
             return
@@ -1375,6 +1382,9 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+    app.setApplicationName(APP_NAME)
+    app.setApplicationDisplayName(APP_NAME)
+    app.setOrganizationName("LRP")
     app.setWindowIcon(make_application_icon())
 
     app.setStyleSheet("""
