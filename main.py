@@ -157,7 +157,7 @@ from PySide6.QtWidgets import (
     QWidget
 )
 
-from PySide6.QtGui import QColor, QPainter, QPixmap, QIcon
+from PySide6.QtGui import QAction, QColor, QPainter, QPixmap, QIcon
 
 
 # Application version and author
@@ -295,6 +295,7 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(make_application_icon())
+        self.build_menu_bar()
 
         container = QWidget()
         container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -501,6 +502,25 @@ class MainWindow(QMainWindow):
         self.build_tabs()
         self.resize_to_available_screen()
         self.sync_pages_width_to_window()
+
+    def build_menu_bar(self):
+        tools_menu = self.menuBar().addMenu("Tools")
+
+        find_center_action = QAction("Find center", self)
+        find_center_action.triggered.connect(self.open_center_tab)
+        tools_menu.addAction(find_center_action)
+
+    def open_center_tab(self):
+        if not hasattr(self, "pages") or not hasattr(self, "centre_tab"):
+            return
+
+        index = self.pages.indexOf(self.centre_tab)
+        if index < 0:
+            return
+
+        self.tab_bar.setCurrentIndex(index)
+        self.on_tab_changed(index)
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.sync_pages_width_to_window()
