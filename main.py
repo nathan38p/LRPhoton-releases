@@ -432,27 +432,6 @@ class MainWindow(QMainWindow):
         header_layout.addStretch()
         header_layout.addWidget(self.header_balance_spacer)
 
-        self.report_button = QPushButton("💬")
-        self.report_button.setFixedHeight(28)
-        self.report_button.setFixedWidth(28)
-        self.report_button.setToolTip("Send a feedback")
-        self.report_button.setCursor(Qt.PointingHandCursor)
-        self.report_button.setStyleSheet("""
-            QPushButton {
-                font-size: 16px;
-                padding: 0px;
-                border: 0px;
-                border-radius: 6px;
-                background: transparent;
-            }
-            QPushButton:hover {
-                background: #eeeeee;
-            }
-        """)
-        self.report_button.clicked.connect(self.open_issue_report_dialog)
-        self.report_button.setVisible(not self.is_development_copy())
-        header_layout.addWidget(self.report_button)
-
         self.version_label = QPushButton()
         self.version_label.setFixedHeight(28)
         self.version_label.setEnabled(False)
