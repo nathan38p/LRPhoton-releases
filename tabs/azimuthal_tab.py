@@ -4,7 +4,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -1463,9 +1463,9 @@ class AzimuthalTab(QWidget):
         install_file_rating_menu(self.file_list)
         self.file_list.setSelectionMode(QListWidget.ExtendedSelection)
         self.file_list.itemSelectionChanged.connect(self.selection_changed)
-        self.file_list.currentItemChanged.connect(lambda current, previous: self.selection_changed())
+        self.file_list.currentItemChanged.connect(self.current_file_changed)
+        self.file_list.itemClicked.connect(self.file_item_clicked)
         self.file_list.setMinimumHeight(180)
-
         file_layout.addWidget(self.file_list, stretch=1)
 
         params_box = QGroupBox("Azimuthal parameters")
@@ -1727,6 +1727,40 @@ class AzimuthalTab(QWidget):
         self.btn_id13.clicked.connect(lambda: self.set_instrument_mode("ID13"))
         self.btn_custom.clicked.connect(self.open_geometry_dialog)
 
+    def current_file_changed(self, current, previous):
+        if current is None:
+            self.selection_changed()
+            return
+        QTimer.singleShot(0, lambda item=current: self.refresh_selected_file_preview(item))
+
+    def file_item_clicked(self, item):
+        if item is None:
+            return
+        self.file_list.setCurrentItem(item)
+        QTimer.singleShot(0, lambda item=item: self.refresh_selected_file_preview(item))
+
+    def refresh_selected_file_preview(self, item):
+        if item is None:
+            return
+
+        current_file = file_path_from_item(item, self.current_folder)
+        if current_file is None:
+            return
+
+        self.set_controls_enabled(True)
+        if hasattr(self, "image_lock_contrast_checkbox") and not self.image_lock_contrast_checkbox.isChecked():
+            self.image_canvas.reset_display_limits()
+
+        self.last_results = {}
+        self.last_result_paths = {}
+        self.last_result_frame_counts = {}
+        self.clear_graph_coordinates()
+        clear_plot_canvas(self.canvas)
+
+        self.apply_preset_from_file(current_file)
+        self.update_frame_controls_from_file(current_file)
+        self.display_selected_file_preview(current_file)
+
     def double_spin(self, value, decimals=3, minimum=-1e9):
         spin = QDoubleSpinBox()
         spin.setDecimals(decimals)
@@ -1939,30 +1973,29 @@ class AzimuthalTab(QWidget):
     def selection_changed(self):
         selected = self.selected_files()
         self.set_controls_enabled(bool(selected))
-        if not self.image_lock_contrast_checkbox.isChecked():
-            self.image_canvas.reset_display_limits()
 
         if selected:
-            self.last_results = {}
-            self.last_result_paths = {}
-            self.last_result_frame_counts = {}
-            self.clear_graph_coordinates()
-            clear_plot_canvas(self.canvas)
-            current_file = selected[0]
-            self.apply_preset_from_file(current_file)
-            self.update_frame_controls_from_file(current_file)
-            self.display_selected_file_preview(current_file)
-        else:
-            self.update_frame_controls_from_file(None)
-            self.last_results = {}
-            self.last_result_paths = {}
-            self.last_result_frame_counts = {}
-            self.clear_graph_coordinates()
-            self.image_canvas.raw_image = None
-            self.image_canvas.set_q_map(None)
-            self.image_coordinate_label.setText("ψ = - | q = - | I = -")
-            clear_plot_canvas(self.canvas)
-            clear_plot_canvas(self.image_canvas)
+            current_item = self.file_list.currentItem()
+            if current_item is not None and current_item.isSelected():
+                QTimer.singleShot(0, lambda item=current_item: self.refresh_selected_file_preview(item))
+                return
+
+            selected_items = self.file_list.selectedItems()
+            if selected_items:
+                self.file_list.setCurrentItem(selected_items[-1])
+                QTimer.singleShot(0, lambda item=selected_items[-1]: self.refresh_selected_file_preview(item))
+                return
+
+        self.update_frame_controls_from_file(None)
+        self.last_results = {}
+        self.last_result_paths = {}
+        self.last_result_frame_counts = {}
+        self.clear_graph_coordinates()
+        self.image_canvas.raw_image = None
+        self.image_canvas.set_q_map(None)
+        self.image_coordinate_label.setText("ψ = - | q = - | I = -")
+        clear_plot_canvas(self.canvas)
+        clear_plot_canvas(self.image_canvas)
 
     def selected_files(self):
         selected_items = list(self.file_list.selectedItems())
@@ -2718,3 +2751,52 @@ class AzimuthalTab(QWidget):
         )
         self._azimuthal_test_dialog = dialog
         dialog.show()
+    def file_item_clicked(self, item):
+        if item is None:
+            return
+        self.file_list.setCurrentItem(item)
+        current_file = file_path_from_item(item, self.current_folder)
+        self.set_controls_enabled(True)
+        if hasattr(self, "image_lock_contrast_checkbox") and not self.image_lock_contrast_checkbox.isChecked():
+            self.image_canvas.reset_display_limits()
+        self.last_results = {}
+        self.last_result_paths = {}
+        self.last_result_frame_counts = {}
+        self.clear_graph_coordinates()
+        clear_plot_canvas(self.canvas)
+        self.apply_preset_from_file(current_file)
+        self.update_frame_controls_from_file(current_file)
+        self.display_selected_file_preview(current_file)
+    def current_file_changed(self, current, previous):
+        if current is None:
+            self.selection_changed()
+            return
+        self.refresh_selected_file_preview(current)
+
+    def file_item_clicked(self, item):
+        if item is None:
+            return
+        self.file_list.setCurrentItem(item)
+        self.refresh_selected_file_preview(item)
+
+    def refresh_selected_file_preview(self, item):
+        if item is None:
+            return
+
+        current_file = file_path_from_item(item, self.current_folder)
+        if current_file is None:
+            return
+
+        self.set_controls_enabled(True)
+        if hasattr(self, "image_lock_contrast_checkbox") and not self.image_lock_contrast_checkbox.isChecked():
+            self.image_canvas.reset_display_limits()
+
+        self.last_results = {}
+        self.last_result_paths = {}
+        self.last_result_frame_counts = {}
+        self.clear_graph_coordinates()
+        clear_plot_canvas(self.canvas)
+
+        self.apply_preset_from_file(current_file)
+        self.update_frame_controls_from_file(current_file)
+        self.display_selected_file_preview(current_file)
