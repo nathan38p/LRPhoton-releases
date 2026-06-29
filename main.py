@@ -141,7 +141,7 @@ ensure_local_python_wheels()
 
 import requests
 
-from PySide6.QtCore import Qt, QTimer, QSize, QByteArray, QBuffer, QIODevice
+from PySide6.QtCore import Qt, QTimer, QSize, QByteArray, QBuffer, QIODevice, QCoreApplication
 
 from PySide6.QtWidgets import (
     QApplication,
@@ -161,7 +161,7 @@ from PySide6.QtWidgets import (
     QWidget
 )
 
-from PySide6.QtGui import QAction, QColor, QPainter, QPixmap, QIcon
+from PySide6.QtGui import QAction, QColor, QPainter, QPalette, QPixmap, QIcon
 
 
 # Application version and author
@@ -248,6 +248,30 @@ def make_application_icon():
 
     return QIcon(canvas)
 
+
+def apply_light_theme(app):
+    if sys.platform != "darwin":
+        app.setStyle("Fusion")
+
+    palette = QPalette()
+    palette.setColor(QPalette.Window, QColor("#ffffff"))
+    palette.setColor(QPalette.WindowText, QColor("#111111"))
+    palette.setColor(QPalette.Base, QColor("#ffffff"))
+    palette.setColor(QPalette.AlternateBase, QColor("#eeeeee"))
+    palette.setColor(QPalette.ToolTipBase, QColor("#ffffff"))
+    palette.setColor(QPalette.ToolTipText, QColor("#111111"))
+    palette.setColor(QPalette.Text, QColor("#111111"))
+    palette.setColor(QPalette.Button, QColor("#e2e2e2"))
+    palette.setColor(QPalette.ButtonText, QColor("#111111"))
+    palette.setColor(QPalette.BrightText, QColor("#ffffff"))
+    palette.setColor(QPalette.Highlight, QColor("#007aff"))
+    palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
+    try:
+        palette.setColor(QPalette.PlaceholderText, QColor("#777777"))
+    except Exception:
+        pass
+    app.setPalette(palette)
+
 class ColoredTabBar(QTabBar):
     TAB_COLORS = {
         0: ("#dbeafe", "#2563eb"),  # View 2D
@@ -268,7 +292,7 @@ class ColoredTabBar(QTabBar):
 
     def tabSizeHint(self, index):
         size = super().tabSizeHint(index)
-        return QSize(size.width() + 4, size.height() + 2)
+        return QSize(size.width() + 4, 30)
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -590,6 +614,7 @@ class MainWindow(QMainWindow):
         self.tab_bar.setExpanding(False)
         self.tab_bar.setMovable(False)
         self.tab_bar.setUsesScrollButtons(True)
+        self.tab_bar.setFixedHeight(34)
 
         self.tab_bar.addTab("🖼️ View 2D")
         self.tab_bar.addTab("📈 Plot 1D")
@@ -1657,73 +1682,55 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    if sys.platform == "darwin":
+        QCoreApplication.setAttribute(Qt.AA_DontUseNativeMenuBar, False)
     app = QApplication(sys.argv)
+    apply_light_theme(app)
     app.setApplicationName(APP_NAME)
     app.setApplicationDisplayName(APP_NAME)
     app.setOrganizationName("LRP")
     app.setWindowIcon(make_application_icon())
 
     app.setStyleSheet("""
-        QFrame {
-            background: transparent;
-        }
-
-        QStackedWidget {
-            background: transparent;
-        }
-
-        QTabBar {
-            background: transparent;
-        }
-
         QTabWidget::pane {
             border: none;
             background: transparent;
         }
 
-        QGroupBox {
-            background-color: #eeeeee;
-            border: 1px solid #d8d8d8;
-            border-radius: 10px;
-            margin-top: 14px;
-            padding: 4px;
-            font-family: Arial;
-            font-size: 12px;
+        QLabel {
+            color: #111111;
+            background: transparent;
         }
 
-        QGroupBox::title {
-            subcontrol-origin: margin;
-            subcontrol-position: top left;
-            left: 8px;
-            padding: 0px 4px;
+        QTextEdit, QPlainTextEdit {
+            background-color: #ffffff;
+            color: #111111;
+            selection-background-color: #007aff;
+            selection-color: #ffffff;
+        }
+
+        QTreeWidget, QTableWidget, QTableView {
+            background-color: #ffffff;
+            color: #111111;
+            selection-background-color: #007aff;
+            selection-color: #ffffff;
+        }
+
+        QListWidget {
             background-color: transparent;
-            color: #222222;
-            font-family: Arial;
-            font-size: 12px;
-        }
-
-        QTabBar::tab {
-            padding: 7px 12px;
-            margin-right: 2px;
-            border-radius: 8px;
+            color: #111111;
             border: none;
-            background: #eeeeee;
-            color: #222222;
-            font-size: 13px;
+            selection-background-color: #007aff;
+            selection-color: #ffffff;
         }
 
-        QTabBar::tab:disabled {
-            background: #f5f5f5;
-            color: #9a9a9a;
+        QListWidget::viewport {
+            background-color: transparent;
         }
 
-        QTabBar::tab:selected {
-            background: #007aff;
-            color: white;
-        }
-
-        QTabBar::tab:hover:!selected {
-            background: #dddddd;
+        QMenu::item:selected {
+            background-color: #007aff;
+            color: #ffffff;
         }
     """)
 

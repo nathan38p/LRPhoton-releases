@@ -45,6 +45,8 @@ from tabs.ui_style import (
     PAGE_MARGINS,
     PANEL_MARGINS,
     make_matplotlib_toolbar_block,
+    set_matplotlib_toolbar_enabled,
+    set_widget_enabled_with_opacity,
 )
 
 
@@ -480,6 +482,7 @@ class VimbaSALSWidget(QWidget):
             save_callback=self.save_current_edf,
             save_tooltip="Save current EDF",
             toolbar_width=340,
+            remove_customize=True,
         )
         self.preview_toolbar_box = toolbar_box
         preview_layout.addWidget(toolbar_box, 0)
@@ -579,17 +582,19 @@ class VimbaSALSWidget(QWidget):
         layout.addWidget(widget, row, 1)
 
     def update_connection_state(self, connected):
+        has_frame = self.current_frame is not None
         self.connect_button.setEnabled(not connected)
         self.start_button.setEnabled(connected and not self.live_timer.isActive())
         self.stop_button.setEnabled(self.live_timer.isActive())
         self.apply_camera_button.setEnabled(connected)
-        self.save_button.setEnabled(self.current_frame is not None)
+        self.save_button.setEnabled(has_frame)
+        set_matplotlib_toolbar_enabled(getattr(self, "toolbar", None), has_frame)
         if hasattr(self, "preview_save_button"):
-            self.preview_save_button.setEnabled(self.current_frame is not None)
+            set_widget_enabled_with_opacity(self.preview_save_button, has_frame)
         if hasattr(self, "record_play_button"):
-            self.record_play_button.setEnabled(not self.is_recording_frames)
+            set_widget_enabled_with_opacity(self.record_play_button, has_frame and not self.is_recording_frames)
         if hasattr(self, "record_stop_button"):
-            self.record_stop_button.setEnabled(self.is_recording_frames)
+            set_widget_enabled_with_opacity(self.record_stop_button, has_frame and self.is_recording_frames)
 
     def request_back(self):
         if self.live_timer.isActive():
@@ -1381,9 +1386,7 @@ class VimbaSALSWidget(QWidget):
             self.current_frame = np.asarray(image)
             self.frame_index += 1
             self.update_preview()
-            self.save_button.setEnabled(True)
-            if hasattr(self, "preview_save_button"):
-                self.preview_save_button.setEnabled(True)
+            self.update_connection_state(self.camera is not None)
         except Exception as exc:
             if not self.is_closing:
                 self.status_label.setText(f"Frame grab failed: {exc}")

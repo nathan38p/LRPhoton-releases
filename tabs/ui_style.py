@@ -3,53 +3,97 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QIcon, QValidator
-from PySide6.QtWidgets import QDoubleSpinBox, QGroupBox, QVBoxLayout, QHBoxLayout, QToolButton
+from PySide6.QtWidgets import QDoubleSpinBox, QGraphicsOpacityEffect, QGroupBox, QVBoxLayout, QHBoxLayout, QToolButton
 
 
 GROUP_BOX_STYLE = """
-    QGroupBox {
-        background-color: #eeeeee;
-        border: 1px solid #d8d8d8;
-        border-radius: 10px;
-        margin-top: 14px;
-        padding: 4px;
-        font-family: Arial;
-        font-size: 12px;
-    }
-
-    QGroupBox::title {
-        subcontrol-origin: margin;
-        subcontrol-position: top left;
-        left: 8px;
-        padding: 0px 4px;
-        background-color: transparent;
-        color: #222222;
-        font-family: Arial;
-        font-size: 12px;
-    }
-
     QPushButton {
-        background-color: #e2e2e2;
+        background-color: #dcdcdc;
+        color: #111111;
         border: 0px;
-        border-radius: 5px;
-        padding: 4px;
+        border-radius: 8px;
+        padding: 6px 10px;
     }
 
     QPushButton:hover {
-        background-color: #d8d8d8;
+        background-color: #d2d2d2;
+    }
+
+    QPushButton:pressed {
+        background-color: #c8c8c8;
+    }
+
+    QPushButton:disabled {
+        background-color: #eeeeee;
+        color: #888888;
+    }
+
+
+    QCheckBox {
+        background-color: transparent;
+        color: #111111;
+    }
+
+    QListWidget QScrollBar:vertical {
+        width: 0px;
+        background: transparent;
+        border: none;
+    }
+
+    QListWidget QScrollBar::handle:vertical {
+        background: transparent;
+        border: none;
+    }
+
+    QListWidget QScrollBar::add-line:vertical,
+    QListWidget QScrollBar::sub-line:vertical,
+    QListWidget QScrollBar::add-page:vertical,
+    QListWidget QScrollBar::sub-page:vertical {
+        background: transparent;
+        border: none;
+        height: 0px;
+    }
+
+    QListWidget QScrollBar:horizontal {
+        height: 0px;
+        background: transparent;
+        border: none;
+    }
+
+    QListWidget QScrollBar::handle:horizontal {
+        background: transparent;
+        border: none;
+    }
+
+    QListWidget QScrollBar::add-line:horizontal,
+    QListWidget QScrollBar::sub-line:horizontal,
+    QListWidget QScrollBar::add-page:horizontal,
+    QListWidget QScrollBar::sub-page:horizontal {
+        background: transparent;
+        border: none;
+        width: 0px;
+    }
+
+    QListWidget {
+        background-color: transparent;
+        border: none;
+    }
+
+    QListWidget::viewport {
+        background-color: transparent;
     }
 """
 
 
 TOOL_GROUP_BOX_STYLE = GROUP_BOX_STYLE + """
     QToolBar {
-        background-color: #eeeeee;
+        background-color: transparent;
         border: 0px;
         spacing: 8px;
     }
 
     QToolButton {
-        background-color: #eeeeee;
+        background-color: transparent;
         border: 0px;
         padding: 4px;
     }
@@ -121,18 +165,27 @@ def matplotlib_toolbar_action_emoji(action):
     return None
 
 
-def emojiize_matplotlib_toolbar(toolbar, button_size=MATPLOTLIB_TOOLBAR_BUTTON_SIZE):
+def toolbar_action_text(action):
+    try:
+        text = action.text().lower()
+    except Exception:
+        text = ""
+    try:
+        tooltip = action.toolTip().lower()
+    except Exception:
+        tooltip = ""
+    return f"{text} {tooltip}"
+
+
+def emojiize_matplotlib_toolbar(toolbar, button_size=MATPLOTLIB_TOOLBAR_BUTTON_SIZE, remove_customize=False):
     try:
         toolbar.setToolButtonStyle(Qt.ToolButtonTextOnly)
     except Exception:
         pass
 
     for action in list(toolbar.actions()):
-        try:
-            text = action.text().lower()
-        except Exception:
-            text = ""
-        if "subplots" in text:
+        label = toolbar_action_text(action)
+        if "subplots" in label or (remove_customize and ("customize" in label or "edit axis" in label)):
             try:
                 toolbar.removeAction(action)
             except Exception:
@@ -172,6 +225,39 @@ def emojiize_matplotlib_toolbar(toolbar, button_size=MATPLOTLIB_TOOLBAR_BUTTON_S
                 """)
             except Exception:
                 pass
+
+
+def set_matplotlib_toolbar_enabled(toolbar, enabled):
+    if toolbar is None:
+        return
+    for action in toolbar.actions():
+        try:
+            if not action.isSeparator():
+                action.setEnabled(enabled)
+        except Exception:
+            pass
+    for action in toolbar.actions():
+        widget = toolbar.widgetForAction(action)
+        if isinstance(widget, QToolButton):
+            set_widget_enabled_with_opacity(widget, enabled)
+
+
+def set_widget_enabled_with_opacity(widget, enabled, disabled_opacity=0.35):
+    if widget is None:
+        return
+    try:
+        widget.setEnabled(enabled)
+    except Exception:
+        pass
+    try:
+        if enabled:
+            widget.setGraphicsEffect(None)
+        else:
+            effect = QGraphicsOpacityEffect(widget)
+            effect.setOpacity(disabled_opacity)
+            widget.setGraphicsEffect(effect)
+    except Exception:
+        pass
 
 
 class FlexibleDoubleSpinBox(QDoubleSpinBox):
@@ -215,11 +301,11 @@ class FlexibleDoubleSpinBox(QDoubleSpinBox):
 
 Q_GEOMETRY_BUTTON_STYLE = """
     QPushButton {
-        background-color: #e2e2e2;
+
         color: #222222;
-        border: 0px;
-        border-radius: 5px;
+
         padding: 4px;
+
     }
     QPushButton:hover {
         background-color: #d8d8d8;
@@ -238,55 +324,32 @@ Q_GEOMETRY_BUTTON_ACTIVE_STYLE = """
 """
 
 
+
 ACTION_BUTTON_STYLE = """
     QPushButton {
-        background-color: #ffffff;
-        color: #222222;
-        border: 1px solid #cfcfcf;
-        border-radius: 6px;
+        background-color: #dcdcdc;
+        color: #111111;
+        border: 0px;
+        border-radius: 8px;
         padding: 6px 10px;
     }
+
     QPushButton:hover {
-        background-color: #f7f7f7;
-        border-color: #b8b8b8;
+        background-color: #d2d2d2;
     }
+
     QPushButton:pressed {
-        background-color: #ededed;
+        background-color: #c8c8c8;
     }
+
     QPushButton:disabled {
-        background-color: #e4e4e4;
-        color: #8d8d8d;
-        border-color: #d6d6d6;
-    }
-"""
-
-
-COMPACT_COMBO_STYLE = """
-    QComboBox {
-        background-color: #ffffff;
-        color: #222222;
-        border: 1px solid #cfcfcf;
-        border-radius: 6px;
-        padding: 2px 18px 2px 6px;
-    }
-    QComboBox:hover {
-        border-color: #b8b8b8;
-    }
-    QComboBox:disabled {
         background-color: #eeeeee;
-        color: #9a9a9a;
-        border-color: #dddddd;
-    }
-    QComboBox::drop-down {
-        border: 0px;
-        width: 16px;
-    }
-    QComboBox::down-arrow {
-        image: none;
-        width: 0px;
-        height: 0px;
+        color: #888888;
     }
 """
+
+
+COMPACT_COMBO_STYLE = ""
 
 
 def style_q_geometry_buttons(buttons, active_mode=None, manual_button=None):
@@ -498,7 +561,7 @@ def constrain_image_axes(ax, image_shape=None, x_bounds=None, y_bounds=None):
     ax.set_ylim(constrained_limits(ax.get_ylim(), y_lower, y_upper))
 
 
-def make_matplotlib_toolbar_block(parent, title, toolbar, option_widgets=None, save_callback=None, save_tooltip="Save", toolbar_width=340):
+def make_matplotlib_toolbar_block(parent, title, toolbar, option_widgets=None, save_callback=None, save_tooltip="Save", toolbar_width=340, remove_customize=False):
     toolbar_box = QGroupBox(title)
     toolbar_box.setFixedHeight(78)
     try:
@@ -537,21 +600,10 @@ def make_matplotlib_toolbar_block(parent, title, toolbar, option_widgets=None, s
     toolbar.coordinates = False
     toolbar.setStyleSheet("""
         QToolBar {
-            background: #eeeeee;
-            background-color: #eeeeee;
-            border: none;
-            spacing: 6px;
-        }
-        QToolButton {
             background: transparent;
             background-color: transparent;
             border: none;
-            padding: 0px;
-            margin: 0px;
-            min-width: 32px;
-            max-width: 32px;
-            min-height: 32px;
-            max-height: 32px;
+            spacing: 6px;
         }
     """)
 
@@ -560,17 +612,19 @@ def make_matplotlib_toolbar_block(parent, title, toolbar, option_widgets=None, s
             text = action.text().lower()
         except Exception:
             text = ""
+        label = toolbar_action_text(action)
         if (
             action.isSeparator()
             or text in ["save", "save the figure", "save image only"]
             or "subplots" in text
+            or (remove_customize and ("customize" in label or "edit axis" in label))
         ):
             try:
                 toolbar.removeAction(action)
             except Exception:
                 pass
 
-    emojiize_matplotlib_toolbar(toolbar, toolbar_button_size)
+    emojiize_matplotlib_toolbar(toolbar, toolbar_button_size, remove_customize=remove_customize)
 
     for action in toolbar.actions():
         widget = toolbar.widgetForAction(action)

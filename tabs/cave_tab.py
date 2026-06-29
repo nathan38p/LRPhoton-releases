@@ -2205,7 +2205,7 @@ class ManualCaveDialog(QDialog):
             text = action.text().lower()
             if "save" in text or "subplots" in text:
                 toolbar.removeAction(action)
-        emojiize_matplotlib_toolbar(toolbar)
+        emojiize_matplotlib_toolbar(toolbar, remove_customize=True)
 
         if hasattr(toolbar, "locLabel"):
             toolbar.locLabel.hide()

@@ -71,6 +71,8 @@ from .ui_style import (
     TOOL_GROUP_BOX_STYLE,
     constrain_image_axes,
     make_matplotlib_toolbar_block,
+    set_matplotlib_toolbar_enabled,
+    set_widget_enabled_with_opacity,
     style_q_geometry_buttons,
 )
 
@@ -479,6 +481,7 @@ class PlaneAnnotationDialog(QDialog):
             save_callback=self.save_png,
             save_tooltip="Save annotated PNG",
             toolbar_width=340,
+            remove_customize=True,
         )
         image_layout.addWidget(toolbar_box, 0)
         image_layout.addWidget(self.canvas, 1)
@@ -2030,8 +2033,9 @@ class ViewTab(QWidget):
         save_callback=None,
         save_tooltip="Save",
         toolbar_width=340,
+        remove_customize=False,
     ):
-        return make_matplotlib_toolbar_block(self, title, toolbar, option_widgets=option_widgets, save_callback=save_callback, save_tooltip=save_tooltip, toolbar_width=toolbar_width)
+        return make_matplotlib_toolbar_block(self, title, toolbar, option_widgets=option_widgets, save_callback=save_callback, save_tooltip=save_tooltip, toolbar_width=toolbar_width, remove_customize=remove_customize)
 
     def _build_ui(self):
         main_layout = QVBoxLayout(self)
@@ -2185,7 +2189,7 @@ class ViewTab(QWidget):
         self.keep_zoom_checkbox.setChecked(True)
         self.keep_zoom_checkbox.setToolTip("Keep current zoom and pan when changing file or frame")
 
-        self.save_colorbar_checkbox = QCheckBox("Save colorbar")
+        self.save_colorbar_checkbox = QCheckBox("Keep contrast")
         self.save_colorbar_checkbox.setChecked(
             self.settings.value("view/save_colorbar", False, type=bool)
         )
@@ -2195,8 +2199,8 @@ class ViewTab(QWidget):
             title="Scattering pattern",
             toolbar=self.toolbar,
             option_widgets=[
-                self.log_checkbox,
                 self.colormap_combo,
+                self.log_checkbox,
                 self.keep_ratio_checkbox,
                 self.keep_zoom_checkbox,
                 self.save_colorbar_checkbox,
@@ -2204,6 +2208,7 @@ class ViewTab(QWidget):
             save_callback=self.save_png_image_only,
             save_tooltip="Save image only",
             toolbar_width=340,
+            remove_customize=True,
         )
 
         center_layout.addWidget(toolbar_box, alignment=Qt.AlignTop)
@@ -2419,7 +2424,7 @@ class ViewTab(QWidget):
         annotation_buttons_layout = QHBoxLayout()
         annotation_buttons_layout.setContentsMargins(0, 0, 0, 0)
         annotation_buttons_layout.setSpacing(6)
-        self.open_annotation_button = QPushButton("✏️ Annotate image")
+        self.open_annotation_button = QPushButton("✏️ Annotate")
         self.open_annotation_button.clicked.connect(self.open_annotation_window)
         self.open_composite_button = QPushButton("🎞️ Composite")
         self.open_composite_button.clicked.connect(self.open_composite_window)
@@ -2438,6 +2443,7 @@ class ViewTab(QWidget):
         self.set_toolbar_options_enabled(False)
 
     def set_toolbar_options_enabled(self, enabled):
+        set_matplotlib_toolbar_enabled(getattr(self, "toolbar", None), enabled)
         for widget in [
             getattr(self, "log_checkbox", None),
             getattr(self, "nan_to_zero_checkbox", None),
@@ -2455,7 +2461,10 @@ class ViewTab(QWidget):
             getattr(self, "open_annotation_button", None),
         ]:
             if widget is not None:
-                widget.setEnabled(enabled)
+                if widget is getattr(self, "save_image_button", None):
+                    set_widget_enabled_with_opacity(widget, enabled)
+                else:
+                    widget.setEnabled(enabled)
 
     # ============================================================
     # SETTINGS
@@ -2836,6 +2845,7 @@ class ViewTab(QWidget):
         except Exception as e:
             self.current_file = None
             self.current_file_type = None
+            self.set_toolbar_options_enabled(False)
             QMessageBox.critical(self, "Error", str(e))
 
     def reset_figure(self):
