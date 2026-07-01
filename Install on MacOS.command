@@ -59,6 +59,7 @@ if /usr/bin/arch -arm64 "$PYTHON_BIN" -c "import platform; raise SystemExit(plat
         matplotlib \
         h5py \
         requests \
+        pyserial \
         hdf5plugin \
         fabio \
         scipy \
@@ -74,6 +75,7 @@ else
         matplotlib \
         h5py \
         requests \
+        pyserial \
         hdf5plugin \
         fabio \
         scipy \

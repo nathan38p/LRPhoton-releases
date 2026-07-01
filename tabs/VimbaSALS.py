@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import re
 import sys
+import time
 
 import numpy as np
 
@@ -43,11 +44,145 @@ from tabs.ui_style import (
     GROUP_BOX_MARGINS,
     GROUP_BOX_STYLE,
     PAGE_MARGINS,
-    PANEL_MARGINS,
     make_matplotlib_toolbar_block,
     set_matplotlib_toolbar_enabled,
     set_widget_enabled_with_opacity,
 )
+
+
+class SMC100Device:
+    DEFAULT_PORT = "/dev/cu.usbserial-130"
+    BAUDRATE = 57600
+
+    def __init__(self, port=None):
+        self.port = port or self.DEFAULT_PORT
+        self.ser = None
+
+    def connect(self, port=None):
+        try:
+            import serial
+        except ImportError as exc:
+            raise RuntimeError("pyserial is missing. Install the 'pyserial' dependency.") from exc
+
+        self.port = port or self.port
+        self.ser = serial.Serial(
+            self.port,
+            self.BAUDRATE,
+            bytesize=serial.EIGHTBITS,
+            parity=serial.PARITY_NONE,
+            stopbits=serial.STOPBITS_ONE,
+            timeout=1,
+        )
+        self.ser.reset_input_buffer()
+        self.ser.reset_output_buffer()
+
+    def close(self):
+        if self.ser is not None and self.ser.is_open:
+            self.ser.close()
+
+    def send(self, command):
+        if self.ser is None or not self.ser.is_open:
+            raise RuntimeError("SMC100 is not connected")
+
+        self.ser.write((command + "\r\n").encode("ascii"))
+        self.ser.flush()
+        time.sleep(0.15)
+        return self.ser.read_all().decode(errors="replace").strip()
+
+    def get_position(self):
+        return self.send("1TP?").replace("1TP", "").strip()
+
+    def get_error(self):
+        return self.send("1TE?")
+
+    def stop(self):
+        return self.send("1ST")
+
+    def move_absolute(self, position):
+        return self.send(f"1PA{position}")
+
+    def move_relative(self, distance):
+        return self.send(f"1PR{distance}")
+
+    def set_velocity(self, velocity):
+        return self.send(f"1VA{velocity}")
+
+    def set_origin(self):
+        return self.send("1DH")
+
+
+class ArduinoPositionDevice:
+    DEFAULT_BAUDRATE = 57600
+
+    def __init__(self, port=None):
+        self.port = port or self.detect_port()
+        self.ser = None
+
+    @staticmethod
+    def detect_port():
+        try:
+            from serial.tools import list_ports
+        except ImportError:
+            return "/dev/cu.usbmodem"
+
+        for port in list_ports.comports():
+            text = f"{port.device} {port.description} {port.hwid}".lower()
+            if "arduino" in text or "uno wifi r4" in text or "usbmodem" in port.device.lower():
+                return port.device
+        return "/dev/cu.usbmodem"
+
+    def connect(self, port=None):
+        try:
+            import serial
+        except ImportError as exc:
+            raise RuntimeError("pyserial is missing. Install the 'pyserial' dependency.") from exc
+
+        self.port = port or self.port or self.detect_port()
+        self.ser = serial.Serial(self.port, self.DEFAULT_BAUDRATE, timeout=1, write_timeout=1)
+        time.sleep(2.0)
+        self.ser.reset_input_buffer()
+        self.ser.reset_output_buffer()
+
+    def close(self):
+        if self.ser is not None and self.ser.is_open:
+            self.ser.close()
+
+    def send(self, command):
+        if self.ser is None or not self.ser.is_open:
+            raise RuntimeError("Arduino is not connected")
+
+        self.ser.write((command + "\r\n").encode("ascii"))
+        self.ser.flush()
+        time.sleep(0.05)
+        return self.ser.read_all().decode(errors="replace").strip()
+
+    def get_position(self):
+        reply = self.send("1TP")
+        matches = re.findall(r"[-+]?(?:\d+(?:[.,]\d*)?|[.,]\d+)(?:[eE][-+]?\d+)?", reply)
+        if matches:
+            return matches[-1].replace(",", ".")
+        return reply.replace("1TP", "").strip()
+
+    def get_error(self):
+        return self.send("1TS")
+
+    def get_version(self):
+        return self.send("1VE")
+
+    def stop(self):
+        return self.send("1ST")
+
+    def move_absolute(self, position):
+        return self.send(f"1PA {position}") or "sent"
+
+    def move_relative(self, distance):
+        return self.send(f"1PR {distance}") or "sent"
+
+    def set_velocity(self, velocity):
+        return self.send(f"1VA {velocity}") or "sent"
+
+    def set_origin(self):
+        return self.send("1OR") or "sent"
 
 
 class SALSPreviewToolbar(NavigationToolbar):
@@ -81,6 +216,7 @@ class VimbaSALSWidget(QWidget):
     back_requested = Signal()
     FIELD_HEIGHT = 22
     FIELD_SPACING = 6
+    POSITION_CONTROL_FIELD_HEIGHT = 30
     INNER_GROUP_MARGINS = (8, 10, 8, 8)
     CAMERA_SPIN_WIDTH = 70
     CAMERA_LABEL_WIDTH = 112
@@ -213,6 +349,10 @@ class VimbaSALSWidget(QWidget):
         self.recording_started_at = None
         self.recording_frame_count = 0
         self.recording_output_folder = None
+        self.smc = SMC100Device()
+        self.arduino = ArduinoPositionDevice()
+        self.smc_connected = False
+        self.smc_origin_position = None
 
         self.live_timer = QTimer(self)
         self.live_timer.timeout.connect(self.grab_live_frame)
@@ -220,6 +360,8 @@ class VimbaSALSWidget(QWidget):
         self.record_timer.timeout.connect(self.record_current_frame)
         self.record_title_timer = QTimer(self)
         self.record_title_timer.timeout.connect(self.update_recording_title)
+        self.smc_timer = QTimer(self)
+        self.smc_timer.timeout.connect(self.refresh_smc_position)
 
         app = QApplication.instance()
         if app is not None:
@@ -411,9 +553,11 @@ class VimbaSALSWidget(QWidget):
 
         controls_layout.addStretch(1)
 
-        preview_box = QWidget()
+        preview_box = QGroupBox("Live EDF preview")
+        preview_box.setStyleSheet(GROUP_BOX_STYLE)
+        self.preview_box = preview_box
         preview_layout = QVBoxLayout(preview_box)
-        preview_layout.setContentsMargins(*PANEL_MARGINS)
+        preview_layout.setContentsMargins(*GROUP_BOX_MARGINS)
         preview_layout.setSpacing(BLOCK_SPACING)
         body_layout.addWidget(preview_box, 1)
 
@@ -476,7 +620,7 @@ class VimbaSALSWidget(QWidget):
         """)
         toolbar_box, _, self.preview_save_button = make_matplotlib_toolbar_block(
             self,
-            "Live EDF preview",
+            "",
             self.toolbar,
             option_widgets=[self.status_label, self.record_play_button, self.record_stop_button],
             save_callback=self.save_current_edf,
@@ -502,6 +646,7 @@ class VimbaSALSWidget(QWidget):
             }
         """)
         preview_layout.addWidget(self.preview_coordinate_label, 0)
+        self.build_smc_controls(body_layout)
 
     def style_acquisition_fields(self):
         for widget in [
@@ -542,6 +687,138 @@ class VimbaSALSWidget(QWidget):
         self.geometry_selector.edit_button.setFixedHeight(self.FIELD_HEIGHT)
         self.geometry_selector.edit_button.setFixedWidth(54)
 
+    def build_smc_controls(self, body_layout):
+        smc_box = QGroupBox("Position control")
+        smc_box.setStyleSheet(GROUP_BOX_STYLE)
+        smc_box.setFixedWidth(260)
+        smc_layout = QVBoxLayout(smc_box)
+        smc_layout.setContentsMargins(*GROUP_BOX_MARGINS)
+        smc_layout.setSpacing(self.FIELD_SPACING)
+        body_layout.addWidget(smc_box, 0)
+
+        self.position_controller_combo = QComboBox()
+        self.position_controller_combo.addItems(["SMC100 - Single table", "ARDUINO - Double table"])
+        self.position_controller_combo.setItemData(0, "Single table", Qt.ToolTipRole)
+        self.position_controller_combo.setItemData(1, "Double table", Qt.ToolTipRole)
+        self.position_controller_combo.setFixedHeight(self.POSITION_CONTROL_FIELD_HEIGHT)
+        self.position_controller_combo.currentIndexChanged.connect(self.update_position_controller_mode)
+        smc_layout.addLayout(self.smc_field_row("Controller", self.position_controller_combo, label_width=72))
+
+        self.smc_status_label = QLabel()
+        self.smc_status_label.setWordWrap(True)
+        self.smc_position_label = QLabel()
+        self.smc_position_label.setVisible(False)
+
+        self.smc_port_edit = QLineEdit(SMC100Device.DEFAULT_PORT)
+        self.smc_port_edit.setFixedHeight(self.POSITION_CONTROL_FIELD_HEIGHT)
+        smc_layout.addLayout(self.smc_field_row("Port", self.smc_port_edit))
+
+        smc_connection_layout = QHBoxLayout()
+        smc_connection_layout.setContentsMargins(0, 0, 0, 0)
+        smc_connection_layout.setSpacing(self.FIELD_SPACING)
+        self.smc_connect_button = QPushButton("Connect")
+        self.smc_connect_button.setFixedHeight(self.POSITION_CONTROL_FIELD_HEIGHT)
+        self.smc_connect_button.clicked.connect(self.connect_smc)
+        smc_connection_layout.addWidget(self.smc_connect_button)
+        self.smc_disconnect_button = QPushButton("Disconnect")
+        self.smc_disconnect_button.setFixedHeight(self.POSITION_CONTROL_FIELD_HEIGHT)
+        self.smc_disconnect_button.clicked.connect(self.disconnect_smc)
+        smc_connection_layout.addWidget(self.smc_disconnect_button)
+        smc_layout.addLayout(smc_connection_layout)
+
+        self.smc_position_label.setText("Absolute position: ---")
+        self.smc_position_label.setAlignment(Qt.AlignCenter)
+        self.smc_position_label.setFixedHeight(self.POSITION_CONTROL_FIELD_HEIGHT)
+        self.smc_position_label.setVisible(True)
+        self.smc_position_label.setStyleSheet("""
+            QLabel {
+                background: #f3f3f3;
+                border: none;
+                border-radius: 8px;
+                padding: 4px 8px;
+                color: #111111;
+                font-family: Menlo, Consolas, monospace;
+            }
+        """)
+        smc_layout.addWidget(self.smc_position_label)
+
+        self.smc_velocity_edit = QLineEdit("1.4")
+        self.smc_velocity_edit.setFixedHeight(self.POSITION_CONTROL_FIELD_HEIGHT)
+        self.smc_velocity_edit.setPlaceholderText("mm/s")
+        self.smc_velocity_button = QPushButton("Apply")
+        self.smc_velocity_button.setFixedHeight(self.POSITION_CONTROL_FIELD_HEIGHT)
+        self.smc_velocity_button.clicked.connect(self.set_smc_velocity)
+        smc_layout.addWidget(self.section_label("Velocity (mm/s)"))
+        smc_layout.addLayout(self.smc_field_with_button(self.smc_velocity_edit, self.smc_velocity_button))
+
+        self.smc_position_edit = QLineEdit("0")
+        self.smc_position_edit.setFixedHeight(self.POSITION_CONTROL_FIELD_HEIGHT)
+        self.smc_position_edit.setPlaceholderText("units")
+        self.smc_move_button = QPushButton("Go")
+        self.smc_move_button.setFixedHeight(self.POSITION_CONTROL_FIELD_HEIGHT)
+        self.smc_move_button.clicked.connect(self.move_smc_absolute)
+        self.smc_absolute_label = self.section_label("Absolute (0-25)")
+        smc_layout.addWidget(self.smc_absolute_label)
+        smc_layout.addLayout(self.smc_field_with_button(self.smc_position_edit, self.smc_move_button))
+
+        self.smc_step_edit = QLineEdit("0.1")
+        self.smc_step_edit.setFixedHeight(self.POSITION_CONTROL_FIELD_HEIGHT)
+        self.smc_step_edit.setPlaceholderText("positive step")
+        step_buttons_layout = QHBoxLayout()
+        step_buttons_layout.setContentsMargins(0, 0, 0, 0)
+        step_buttons_layout.setSpacing(self.FIELD_SPACING)
+        self.smc_step_plus_button = QPushButton("⬇ Down")
+        self.smc_step_plus_button.setFixedHeight(self.POSITION_CONTROL_FIELD_HEIGHT)
+        self.smc_step_plus_button.clicked.connect(lambda: self.move_smc_relative(1))
+        step_buttons_layout.addWidget(self.smc_step_plus_button)
+        self.smc_step_minus_button = QPushButton("⬆ Up")
+        self.smc_step_minus_button.setFixedHeight(self.POSITION_CONTROL_FIELD_HEIGHT)
+        self.smc_step_minus_button.clicked.connect(lambda: self.move_smc_relative(-1))
+        step_buttons_layout.addWidget(self.smc_step_minus_button)
+        smc_layout.addWidget(self.section_label("Relative"))
+        smc_layout.addWidget(self.smc_step_edit)
+        smc_layout.addLayout(step_buttons_layout)
+
+        origin_buttons_layout = QHBoxLayout()
+        origin_buttons_layout.setContentsMargins(0, 0, 0, 0)
+        origin_buttons_layout.setSpacing(self.FIELD_SPACING)
+        self.smc_set_origin_button = QPushButton("Set origin")
+        self.smc_set_origin_button.setFixedHeight(self.POSITION_CONTROL_FIELD_HEIGHT)
+        self.smc_set_origin_button.clicked.connect(self.set_smc_origin)
+        origin_buttons_layout.addWidget(self.smc_set_origin_button)
+        self.smc_go_origin_button = QPushButton("Go back to origin")
+        self.smc_go_origin_button.setFixedHeight(self.POSITION_CONTROL_FIELD_HEIGHT)
+        self.smc_go_origin_button.clicked.connect(self.go_smc_origin)
+        origin_buttons_layout.addWidget(self.smc_go_origin_button)
+        smc_layout.addWidget(self.section_label("Origin"))
+        smc_layout.addLayout(origin_buttons_layout)
+
+        self.smc_stop_button = QPushButton("STOP")
+        self.smc_stop_button.setFixedHeight(36)
+        self.smc_stop_button.setStyleSheet("QPushButton { background: #c62828; color: white; font-weight: 600; }")
+        self.smc_stop_button.clicked.connect(self.stop_smc)
+        smc_layout.addWidget(self.smc_stop_button)
+        smc_layout.addWidget(self.smc_status_label)
+
+        smc_layout.addStretch(1)
+        self.update_smc_controls(False)
+
+    def smc_field_row(self, label_text, field, label_width=52):
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(self.FIELD_SPACING)
+        layout.addWidget(self.form_label(label_text, label_width))
+        layout.addWidget(field, 1)
+        return layout
+
+    def smc_field_with_button(self, field, button):
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(self.FIELD_SPACING)
+        layout.addWidget(field, 1)
+        layout.addWidget(button)
+        return layout
+
     def form_label(self, text, minimum_width=0):
         label = QLabel(f"{text}:")
         label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -580,6 +857,242 @@ class VimbaSALSWidget(QWidget):
         label = self.form_label(label_text, self.SALS_LABEL_WIDTH)
         layout.addWidget(label, row, 0)
         layout.addWidget(widget, row, 1)
+
+    def update_smc_controls(self, connected):
+        self.smc_connected = connected
+        controller_selected = self.is_position_controller_available()
+        self.smc_status_label.setVisible(not self.is_arduino_controller_selected())
+        self.position_controller_combo.setEnabled(not connected)
+        self.smc_connect_button.setEnabled(controller_selected and not connected)
+        self.smc_disconnect_button.setEnabled(controller_selected and connected)
+        self.smc_port_edit.setEnabled(controller_selected and not connected)
+        for widget in [
+            self.smc_velocity_edit,
+            self.smc_velocity_button,
+            self.smc_position_edit,
+            self.smc_move_button,
+            self.smc_step_edit,
+            self.smc_step_minus_button,
+            self.smc_step_plus_button,
+            self.smc_set_origin_button,
+            self.smc_stop_button,
+        ]:
+            widget.setEnabled(controller_selected and connected)
+        self.smc_go_origin_button.setEnabled(controller_selected and connected and self.smc_origin_position is not None)
+
+    def is_smc_controller_selected(self):
+        return self.position_controller_combo.currentText().startswith("SMC100")
+
+    def is_arduino_controller_selected(self):
+        return self.position_controller_combo.currentText().startswith("ARDUINO")
+
+    def is_position_controller_available(self):
+        return self.is_smc_controller_selected() or self.is_arduino_controller_selected()
+
+    def active_position_device(self):
+        if self.is_arduino_controller_selected():
+            return self.arduino
+        return self.smc
+
+    def update_position_controller_mode(self, *_):
+        if self.smc_connected:
+            return
+        self.update_smc_controls(False)
+        if self.is_smc_controller_selected():
+            self.smc_absolute_label.setText("Absolute (0-25)")
+            self.smc_port_edit.setText(SMC100Device.DEFAULT_PORT)
+            self.smc_status_label.setText("Disconnected")
+            self.smc_position_label.setText("Absolute position: ---")
+            self.smc_position_label.setVisible(True)
+        else:
+            self.smc_absolute_label.setText("Absolute")
+            self.smc_port_edit.setText(ArduinoPositionDevice.detect_port())
+            self.smc_status_label.clear()
+            self.smc_position_label.setText("Absolute position: ---")
+            self.smc_position_label.setVisible(True)
+
+    def connect_smc(self):
+        if not self.is_position_controller_available():
+            self.smc_status_label.setText("Select a position controller.")
+            return
+        try:
+            device = self.active_position_device()
+            if self.is_arduino_controller_selected():
+                default_port = ArduinoPositionDevice.detect_port()
+            else:
+                default_port = SMC100Device.DEFAULT_PORT
+            device.connect(self.smc_port_edit.text().strip() or default_port)
+            self.update_smc_controls(True)
+            self.smc_status_label.setText(f"Connected: {device.port}")
+            if self.is_arduino_controller_selected():
+                self.smc_timer.start(250)
+                self.refresh_smc_position()
+            else:
+                self.smc_timer.start(1000)
+                self.refresh_smc_position()
+        except Exception as exc:
+            self.smc_status_label.setText(f"Connection error: {exc}")
+            self.update_smc_controls(False)
+
+    def disconnect_smc(self):
+        self.shutdown_smc()
+        self.smc_status_label.setText("Disconnected")
+        self.smc_position_label.setText("Absolute position: ---")
+        self.update_smc_controls(False)
+
+    def stop_smc(self):
+        self.run_smc_command(
+            "STOP",
+            self.active_position_device().stop,
+            refresh=not self.is_arduino_controller_selected(),
+        )
+
+    def move_smc_absolute(self):
+        position = self.smc_position_edit.text().strip().replace(",", ".")
+        if not position:
+            self.smc_status_label.setText("Absolute position is empty.")
+            return
+        current_position = None if self.is_arduino_controller_selected() else self.current_smc_position_value()
+        target_position = self.optional_float(position)
+        direction_text = ""
+        if current_position is not None and target_position is not None:
+            if target_position > current_position:
+                direction_text = " - table moves down"
+            elif target_position < current_position:
+                direction_text = " - table moves up"
+        self.run_smc_command(
+            f"Absolute position {position}{direction_text}",
+            lambda: self.move_active_position_absolute(position),
+            refresh=not self.is_arduino_controller_selected(),
+        )
+
+    def move_smc_relative(self, direction):
+        step = self.smc_step_edit.text().strip().replace(",", ".")
+        if not step:
+            self.smc_status_label.setText("Relative step is empty.")
+            return
+        try:
+            distance = float(step) * direction
+        except ValueError:
+            self.smc_status_label.setText(f"Invalid relative step: {step}")
+            return
+        motion_text = "Down" if distance > 0 else "Up"
+        command_distance = -distance if self.is_arduino_controller_selected() else distance
+        self.run_smc_command(
+            f"{motion_text} by {abs(distance):g}",
+            lambda: self.move_active_position_relative(command_distance),
+            refresh=not self.is_arduino_controller_selected(),
+        )
+
+    def set_smc_velocity(self):
+        velocity = self.smc_velocity_edit.text().strip().replace(",", ".")
+        if not velocity:
+            self.smc_status_label.setText("Velocity is empty.")
+            return
+        self.run_smc_command(
+            "Velocity",
+            lambda: self.active_position_device().set_velocity(velocity),
+            refresh=not self.is_arduino_controller_selected(),
+        )
+
+    def set_smc_origin(self):
+        try:
+            device = self.active_position_device()
+            if self.is_arduino_controller_selected():
+                device.set_origin()
+                self.smc_origin_position = "0"
+                self.smc_go_origin_button.setEnabled(True)
+                self.update_position_label("0")
+                return
+            reply = ""
+            position = device.get_position().strip()
+            if not position:
+                self.smc_status_label.setText("Could not read the selected origin position.")
+                return
+            self.smc_origin_position = position
+            self.smc_go_origin_button.setEnabled(True)
+            reply_text = f" : {reply}" if reply else ""
+            self.smc_status_label.setText(f"Origin set{reply_text} | pos {position}")
+        except Exception as exc:
+            self.smc_status_label.setText(f"Set origin error: {exc}")
+
+    def go_smc_origin(self):
+        if self.smc_origin_position is None:
+            self.smc_status_label.setText("No origin selected.")
+            return
+        self.run_smc_command(
+            f"Back to selected origin {self.smc_origin_position}",
+            lambda: self.move_active_position_absolute(self.smc_origin_position),
+            refresh=not self.is_arduino_controller_selected(),
+        )
+
+    def move_active_position_absolute(self, position):
+        reply = self.active_position_device().move_absolute(position)
+        return reply
+
+    def move_active_position_relative(self, distance):
+        return self.active_position_device().move_relative(f"{distance:g}")
+
+    def refresh_smc_position(self):
+        if not self.smc_connected:
+            return
+        try:
+            position = self.active_position_device().get_position()
+            self.smc_position_label.setText(f"Absolute position: {position or '---'}")
+        except Exception as exc:
+            if not self.is_arduino_controller_selected():
+                self.smc_status_label.setText(f"Read error: {exc}")
+
+    def current_smc_position_value(self):
+        try:
+            return self.optional_float(self.active_position_device().get_position())
+        except Exception:
+            return None
+
+    def current_displayed_position_value(self):
+        text = self.smc_position_label.text().replace("Absolute position:", "").strip()
+        if text == "---":
+            return None
+        return self.optional_float(text)
+
+    def update_position_label(self, position):
+        self.smc_position_label.setText(f"Absolute position: {position or '---'}")
+
+    def run_smc_command(self, label, callback, refresh=True):
+        try:
+            reply = callback()
+            message = f"{label} : {reply or 'OK'}"
+            if refresh:
+                message = self.smc_diagnostic_text(message)
+            self.smc_status_label.setText(message)
+        except Exception as exc:
+            self.smc_status_label.setText(f"{label} error: {exc}")
+
+    def smc_diagnostic_text(self, prefix):
+        details = []
+        try:
+            position = self.active_position_device().get_position()
+            self.smc_position_label.setText(f"Absolute position: {position or '---'}")
+            details.append(f"pos {position or '---'}")
+        except Exception as exc:
+            details.append(f"pos err {exc}")
+        try:
+            error = self.active_position_device().get_error()
+            if error:
+                status_label = "TS" if self.is_arduino_controller_selected() else "TE"
+                details.append(f"{status_label} {error}")
+        except Exception:
+            pass
+        return f"{prefix} | {' | '.join(details)}"
+
+    def shutdown_smc(self):
+        self.smc_timer.stop()
+        self.smc_connected = False
+        for device in (self.smc, self.arduino):
+            try:
+                device.close()
+            except Exception:
+                pass
 
     def update_connection_state(self, connected):
         has_frame = self.current_frame is not None
@@ -1758,16 +2271,16 @@ class VimbaSALSWidget(QWidget):
             self.status_label.setText(f"Recording stopped. Saved {saved_count} EDF frame(s){folder_text}.")
 
     def update_recording_title(self):
-        if not hasattr(self, "preview_toolbar_box"):
+        if not hasattr(self, "preview_box"):
             return
         if not self.is_recording_frames or self.recording_started_at is None:
-            self.preview_toolbar_box.setTitle("Live EDF preview")
+            self.preview_box.setTitle("Live EDF preview")
             return
         elapsed = datetime.now() - self.recording_started_at
         total_seconds = max(0, int(elapsed.total_seconds()))
         minutes, seconds = divmod(total_seconds, 60)
         hours, minutes = divmod(minutes, 60)
-        self.preview_toolbar_box.setTitle(
+        self.preview_box.setTitle(
             f"Live EDF preview - REC {hours:02d}:{minutes:02d}:{seconds:02d}"
         )
 
@@ -1930,6 +2443,7 @@ class VimbaSALSWidget(QWidget):
 
     def shutdown_camera(self):
         self.is_closing = True
+        self.shutdown_smc()
         self.disconnect_camera(closing=True)
 
     def disconnect_camera(self, closing=False):

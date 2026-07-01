@@ -4,6 +4,7 @@ matplotlib
 h5py
 fabio
 requests
+pyserial
 hdf5plugin
 scipy
 pyFAI

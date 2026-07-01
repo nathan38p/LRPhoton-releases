@@ -108,6 +108,7 @@ numpy ^
 matplotlib ^
 h5py ^
 requests ^
+pyserial ^
 hdf5plugin ^
 fabio ^
 scipy ^

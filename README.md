@@ -83,6 +83,7 @@ matplotlib
 h5py
 fabio
 requests
+pyserial
 hdf5plugin
 scipy
 pyFAI
@@ -117,13 +118,13 @@ If needed, the same dependencies can be installed directly.
 On Windows:
 
 ```text
-python -m pip install PySide6 numpy matplotlib h5py fabio requests hdf5plugin scipy pyFAI
+python -m pip install PySide6 numpy matplotlib h5py fabio requests pyserial hdf5plugin scipy pyFAI
 ```
 
 On macOS:
 
 ```text
-python3 -m pip install PySide6 numpy matplotlib h5py fabio requests hdf5plugin scipy pyFAI
+python3 -m pip install PySide6 numpy matplotlib h5py fabio requests pyserial hdf5plugin scipy pyFAI
 ```
 
 ### Vimba / SALS camera module
